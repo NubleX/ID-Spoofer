@@ -1,11 +1,29 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Hardware Identity Spoofer
-Comment=Spoof hardware and network identifiers for anonymity
-Exec=sudo /usr/local/bin/hardware-spoof.sh
+Name=ID-Spoofer
+GenericName=Hardware Identity Spoofer
+Comment=Spoof hardware and network identifiers for anonymity and security testing
+Exec=sudo /usr/local/bin/hardware-spoof.sh --gui
 Icon=security-high
 Terminal=true
-Categories=System;Security;
-Keywords=spoof;hardware;network;security;pentesting;privacy
+Categories=System;Security;Network;
+Keywords=spoof;hardware;network;security;pentesting;privacy;mac;anonymity;identity;fingerprint
 StartupNotify=true
+MimeType=
+Actions=MenuMode;MacOnly;HostnameOnly;
+
+[Desktop Action MenuMode]
+Name=Interactive Menu
+Exec=sudo /usr/local/bin/idspoof-menu.sh
+Icon=preferences-system
+
+[Desktop Action MacOnly]
+Name=MAC Addresses Only
+Exec=sudo /usr/local/bin/hardware-spoof.sh --mac-only --gui
+Icon=network-wired
+
+[Desktop Action HostnameOnly]
+Name=Hostname Only
+Exec=sudo /usr/local/bin/hardware-spoof.sh --hostname-only --gui
+Icon=computer
