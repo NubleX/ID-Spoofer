@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/images/logo.png" alt="ID-Spoofer Logo" width="200"/>
+  <img src="assets/images/logo.png" alt="ID-Spoofer Logo" width="400"/>
 
 # Linux Identity Spoofer v1.0
 
