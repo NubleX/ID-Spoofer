@@ -60,10 +60,14 @@ GUI_MODE="no"
 MAC_ONLY="no"
 HOSTNAME_ONLY="no"
 QUIET_MODE="no"
+DEBUG_MODE="no"
 LOG_FILE=""
 TEMP_DIR="/tmp/idspoofer-$$"
 PROGRESS_FILE=""
 PROGRESS_PID=""
+
+# Core CLI mode: plan | apply | restore | status
+CLI_MODE="apply"
 
 # Create temporary directory
 mkdir -p "$TEMP_DIR"
@@ -93,13 +97,17 @@ log_message() {
   local message="$2"
   local timestamp
   timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-  
+
   if [ -n "$LOG_FILE" ]; then
     echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
   fi
-  
-  if [ "$QUIET_MODE" = "no" ] && [ "$level" = "ERROR" ]; then
-    echo "ERROR: $message" >&2
+
+  if [ "$QUIET_MODE" = "no" ]; then
+    if [ "$level" = "ERROR" ]; then
+      echo "ERROR: $message" >&2
+    elif [ "$DEBUG_MODE" = "yes" ] && [ "$level" = "DEBUG" ]; then
+      echo "DEBUG: $message"
+    fi
   fi
 }
 
@@ -158,6 +166,31 @@ ensure_state_dir() {
   mkdir -p "$STATE_DIR" 2>/dev/null || true
 }
 
+# Simple key/value state helpers (one key per line: KEY=value)
+write_state_var() {
+  local key="$1"
+  local value="$2"
+  local tmp
+
+  ensure_state_dir
+  tmp="$STATE_FILE.tmp.$$"
+
+  if [ -f "$STATE_FILE" ]; then
+    grep -v "^$key=" "$STATE_FILE" 2>/dev/null > "$tmp" || true
+  fi
+
+  echo "$key=$value" >> "$tmp"
+  mv "$tmp" "$STATE_FILE"
+}
+
+read_state_var() {
+  local key="$1"
+  if [ ! -f "$STATE_FILE" ]; then
+    return 1
+  fi
+  grep "^$key=" "$STATE_FILE" 2>/dev/null | head -n1 | cut -d'=' -f2-
+}
+
 # Record original hostname once for rollback
 record_original_hostname() {
   ensure_state_dir
@@ -172,10 +205,8 @@ record_original_hostname() {
     current=$(hostname)
   fi
 
-  {
-    echo "STATE_VERSION=1"
-    echo "ORIG_HOSTNAME=$current"
-  } > "$STATE_FILE"
+  write_state_var "STATE_VERSION" "1"
+  write_state_var "ORIG_HOSTNAME" "$current"
 }
 
 # Atomically update /etc/hostname and runtime hostname
@@ -188,6 +219,7 @@ set_system_hostname() {
   fi
 
   if command -v hostnamectl >/dev/null 2>&1; then
+    log_message "DEBUG" "Using hostnamectl to set hostname to $new_hostname"
     if ! hostnamectl set-hostname "$new_hostname" 2>/dev/null; then
       log_message "ERROR" "hostnamectl failed to set hostname to $new_hostname"
       return 1
@@ -212,6 +244,37 @@ set_system_hostname() {
   fi
 
   return 0
+}
+
+# Restore hostname from state (if recorded)
+restore_hostname() {
+  local orig current
+  orig=$(read_state_var "ORIG_HOSTNAME") || return 0
+
+  if [ -z "$orig" ]; then
+    log_message "DEBUG" "No original hostname recorded in state"
+    return 0
+  fi
+
+  if command -v hostnamectl >/dev/null 2>&1; then
+    current=$(hostnamectl --static 2>/dev/null || hostname)
+  else
+    current=$(hostname)
+  fi
+
+  if [ "$current" = "$orig" ]; then
+    log_message "DEBUG" "Hostname already matches original ($orig)"
+    return 0
+  fi
+
+  log_message "INFO" "Restoring hostname to original value: $orig"
+  if set_system_hostname "$orig"; then
+    update_hosts_hostname "$current" "$orig"
+    return 0
+  else
+    log_message "ERROR" "Failed to restore hostname to $orig"
+    return 1
+  fi
 }
 
 # Safely update /etc/hosts entries for the hostname
@@ -336,6 +399,76 @@ get_network_interfaces() {
   ip -o link show | awk -F': ' '{print $2}' | grep -v "lo" | sort
 }
 
+# Detect active network manager (for MAC handling + debug)
+detect_network_manager() {
+  local manager="unknown"
+
+  if command -v nmcli >/dev/null 2>&1 && nmcli general status >/dev/null 2>&1; then
+    manager="NetworkManager"
+  elif command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet systemd-networkd 2>/dev/null; then
+    manager="systemd-networkd"
+  fi
+
+  log_message "DEBUG" "Detected network manager: $manager"
+  write_state_var "NET_MANAGER" "$manager"
+}
+
+verify_mac_address() {
+  local iface="$1"
+  local expected="$2"
+  local current
+
+  current=$(ip link show "$iface" 2>/dev/null | grep -o -E '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}' | head -1)
+
+  if [ -z "$current" ]; then
+    log_message "ERROR" "Unable to read MAC for interface $iface during verification"
+    return 1
+  fi
+
+  if [ "$current" != "$expected" ]; then
+    log_message "ERROR" "Verification failed for $iface: expected $expected, got $current"
+    return 1
+  fi
+
+  log_message "DEBUG" "Verified MAC for $iface as $current"
+  return 0
+}
+
+restore_macs_from_state() {
+  local macs iface mac entry
+
+  macs=$(read_state_var "ORIG_MACS") || {
+    log_message "DEBUG" "No original MAC information recorded in state"
+    return 0
+  }
+
+  if [ -z "$macs" ]; then
+    log_message "DEBUG" "Original MAC state is empty"
+    return 0
+  fi
+
+  log_message "INFO" "Restoring MAC addresses from state"
+
+  IFS=';' read -r -a entries <<< "$macs"
+  for entry in "${entries[@]}"; do
+    iface="${entry%%:*}"
+    mac="${entry#*:}"
+
+    if [ -z "$iface" ] || [ -z "$mac" ]; then
+      continue
+    fi
+
+    log_message "DEBUG" "Restoring $iface to $mac"
+    ip link set "$iface" down 2>/dev/null || true
+    if macchanger -m "$mac" "$iface" >/dev/null 2>&1; then
+      ip link set "$iface" up 2>/dev/null || true
+      verify_mac_address "$iface" "$mac" || true
+    else
+      log_message "WARN" "Failed to restore MAC for $iface to $mac"
+    fi
+  done
+}
+
 # Function to spoof MAC addresses
 spoof_mac_addresses() {
   log_message "INFO" "Starting MAC address spoofing"
@@ -351,6 +484,8 @@ spoof_mac_addresses() {
   fi
   
   show_progress "Disabling network interfaces..." 20
+
+  detect_network_manager
 
   local has_nmcli=0
   if command -v nmcli >/dev/null 2>&1; then
@@ -376,24 +511,46 @@ spoof_mac_addresses() {
       }
     fi
   done <<< "$interfaces"
+
+  # Persist original MACs in state for later restore
+  if [ -s "$TEMP_DIR/original_macs" ]; then
+    local mac_state
+    mac_state=$(tr '\n' ';' < "$TEMP_DIR/original_macs" | sed 's/;$//')
+    write_state_var "ORIG_MACS" "$mac_state"
+  fi
   
   show_progress "Changing MAC addresses..." 60
   
   # Change MAC addresses
   true > "$TEMP_DIR/mac_changes"
+  local failed=0
   while IFS= read -r interface; do
     if [ -n "$interface" ]; then
       local new_mac
       new_mac=$(random_mac)
       
       if macchanger -m "$new_mac" "$interface" >/dev/null 2>&1; then
-        echo "$interface: $new_mac" >> "$TEMP_DIR/mac_changes"
-        log_message "INFO" "Changed MAC for $interface to $new_mac"
+        if verify_mac_address "$interface" "$new_mac"; then
+          echo "$interface:$new_mac" >> "$TEMP_DIR/mac_changes"
+          log_message "INFO" "Changed MAC for $interface to $new_mac"
+        else
+          failed=1
+          log_message "ERROR" "MAC change verification failed for $interface, will trigger rollback"
+          break
+        fi
       else
+        failed=1
         log_message "WARN" "Failed to change MAC for $interface"
+        break
       fi
     fi
   done <<< "$interfaces"
+
+  if [ $failed -ne 0 ]; then
+    log_message "INFO" "Rolling back MAC changes due to failure"
+    restore_macs_from_state
+    return 1
+  fi
   
   show_progress "Re-enabling network interfaces..." 90
   
