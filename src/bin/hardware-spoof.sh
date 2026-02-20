@@ -5,13 +5,17 @@
 # Author: Igor Dunaev / NubleX
 # A tool for spoofing hardware and network identifiers in Linux
 
-# Exit on any error
+# Exit on any error (critical paths will perform their own checks/rollbacks)
 set -e
 
 # Script metadata
 VERSION="1.0.0"
 SCRIPT_NAME="ID-Spoofer"
 AUTHOR="Igor Dunaev / NubleX"
+
+# State / rollback storage (used for hostname + future extensions)
+STATE_DIR="/var/log/idspoof"
+STATE_FILE="$STATE_DIR/state.env"
 
 # Check if running as root
 if [ "$(id -u)" -ne "0" ]; then
@@ -127,6 +131,125 @@ random_hostname() {
   echo "${prefix}-${suffix}"
 }
 
+# Validate a hostname (basic RFC-style rules)
+valid_hostname() {
+  local name="$1"
+  # Length 1-253, allowed chars A-Z0-9- and dots, no leading/trailing hyphen in labels
+  if [ -z "$name" ] || [ ${#name} -gt 253 ]; then
+    return 1
+  fi
+  if echo "$name" | grep -q "[^A-Za-z0-9.-]"; then
+    return 1
+  fi
+  IFS='.' read -r -a labels <<< "$name"
+  for label in "${labels[@]}"; do
+    if [ -z "$label" ] || [ ${#label} -gt 63 ]; then
+      return 1
+    fi
+    if echo "$label" | grep -qE '(^-)|(-$)'; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+# Ensure state directory exists
+ensure_state_dir() {
+  mkdir -p "$STATE_DIR" 2>/dev/null || true
+}
+
+# Record original hostname once for rollback
+record_original_hostname() {
+  ensure_state_dir
+  if [ -f "$STATE_FILE" ] && grep -q "^ORIG_HOSTNAME=" "$STATE_FILE" 2>/dev/null; then
+    return 0
+  fi
+
+  local current
+  if command -v hostnamectl >/dev/null 2>&1; then
+    current=$(hostnamectl --static 2>/dev/null || hostname)
+  else
+    current=$(hostname)
+  fi
+
+  {
+    echo "STATE_VERSION=1"
+    echo "ORIG_HOSTNAME=$current"
+  } > "$STATE_FILE"
+}
+
+# Atomically update /etc/hostname and runtime hostname
+set_system_hostname() {
+  local new_hostname="$1"
+
+  if ! valid_hostname "$new_hostname"; then
+    log_message "ERROR" "Refusing to set invalid hostname: $new_hostname"
+    return 1
+  fi
+
+  if command -v hostnamectl >/dev/null 2>&1; then
+    if ! hostnamectl set-hostname "$new_hostname" 2>/dev/null; then
+      log_message "ERROR" "hostnamectl failed to set hostname to $new_hostname"
+      return 1
+    fi
+  else
+    # Fallback: atomic write + legacy hostname command
+    local tmp_file="/etc/hostname.idspoof.$$"
+    if ! printf '%s\n' "$new_hostname" > "$tmp_file"; then
+      log_message "ERROR" "Failed to write temporary /etc/hostname"
+      rm -f "$tmp_file" 2>/dev/null || true
+      return 1
+    fi
+    if ! mv "$tmp_file" /etc/hostname; then
+      log_message "ERROR" "Failed to replace /etc/hostname atomically"
+      rm -f "$tmp_file" 2>/dev/null || true
+      return 1
+    fi
+    if ! hostname "$new_hostname" 2>/dev/null; then
+      log_message "ERROR" "Legacy hostname command failed"
+      return 1
+    fi
+  fi
+
+  return 0
+}
+
+# Safely update /etc/hosts entries for the hostname
+update_hosts_hostname() {
+  local old_hostname="$1"
+  local new_hostname="$2"
+
+  [ -f /etc/hosts ] || return 0
+
+  ensure_state_dir
+  if [ ! -f "$STATE_DIR/hosts.backup" ]; then
+    cp /etc/hosts "$STATE_DIR/hosts.backup" 2>/dev/null || true
+  fi
+
+  local tmp_file="/etc/hosts.idspoof.$$"
+  awk -v old="$old_hostname" -v new="$new_hostname" '
+    BEGIN { changed = 0 }
+    # Only touch 127.0.0.1 or 127.0.1.1 lines
+    /^127\.0\.0\.1[ \t]/ || /^127\.0\.1\.1[ \t]/ {
+      for (i = 2; i <= NF; i++) {
+        if ($i == old) {
+          $i = new
+          changed = 1
+        }
+      }
+    }
+    { print }
+    END {
+      if (!changed) {
+        print "127.0.1.1\t" new
+      }
+    }
+  ' /etc/hosts > "$tmp_file" && mv "$tmp_file" /etc/hosts 2>/dev/null || {
+    rm -f "$tmp_file" 2>/dev/null || true
+    log_message "WARN" "Failed to update /etc/hosts for hostname change"
+  }
+}
+
 # Function to generate Windows-like system info
 gen_windows_info() {
   local manufacturers=("Dell Inc." "HP" "Lenovo" "ASUS" "Acer" "Microsoft Corporation")
@@ -228,6 +351,11 @@ spoof_mac_addresses() {
   fi
   
   show_progress "Disabling network interfaces..." 20
+
+  local has_nmcli=0
+  if command -v nmcli >/dev/null 2>&1; then
+    has_nmcli=1
+  fi
   
   # Store original MAC addresses
   true > "$TEMP_DIR/original_macs"
@@ -237,6 +365,11 @@ spoof_mac_addresses() {
       original_mac=$(ip link show "$interface" | grep -o -E '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}' | head -1)
       echo "$interface:$original_mac" >> "$TEMP_DIR/original_macs"
       
+      # Try to let NetworkManager gracefully release the device first
+      if [ $has_nmcli -eq 1 ]; then
+        nmcli device disconnect "$interface" 2>/dev/null || true
+      fi
+
       # Bring interface down
       ip link set "$interface" down 2>/dev/null || {
         log_message "WARN" "Failed to bring down interface $interface"
@@ -270,6 +403,11 @@ spoof_mac_addresses() {
       ip link set "$interface" up 2>/dev/null || {
         log_message "WARN" "Failed to bring up interface $interface"
       }
+
+      # Ask NetworkManager to reconnect the device if present
+      if [ $has_nmcli -eq 1 ]; then
+        nmcli device connect "$interface" 2>/dev/null || true
+      fi
     fi
   done <<< "$interfaces"
   
@@ -293,21 +431,24 @@ spoof_hostname() {
   
   local new_hostname
   new_hostname=$(random_hostname)
-  
-  # Store original hostname
-  hostname > "$TEMP_DIR/original_hostname"
-  
+
+  # Record original hostname once for rollback
+  record_original_hostname
+
+  # Determine current hostname for /etc/hosts update
+  local old_hostname
+  if command -v hostnamectl >/dev/null 2>&1; then
+    old_hostname=$(hostnamectl --static 2>/dev/null || hostname)
+  else
+    old_hostname=$(hostname)
+  fi
+
   show_progress "Setting hostname..." 70
-  
-  # Set new hostname
-  if hostname "$new_hostname" 2>/dev/null; then
-    echo "$new_hostname" > /etc/hostname
-    
-    # Update /etc/hosts
-    if [ -f /etc/hosts ]; then
-      sed -i.bak "s/127\.0\.1\.1.*/127.0.1.1\t$new_hostname/g" /etc/hosts
-    fi
-    
+
+  # Apply hostname change using helper (systemd-aware)
+  if set_system_hostname "$new_hostname"; then
+    update_hosts_hostname "$old_hostname" "$new_hostname"
+
     show_progress "Hostname spoofing complete" 100
     show_notification "Hostname Changed" "New hostname: $new_hostname"
     log_message "INFO" "Hostname changed to: $new_hostname"
