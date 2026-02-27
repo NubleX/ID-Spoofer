@@ -5,6 +5,39 @@ All notable changes to the ID-Spoofer project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-02-27
+
+### Changed
+
+- **Full Go rewrite** — replaced ~890-line Bash toolkit with a structured Go binary (`github.com/NubleX/idspoof`)
+- **System hostname never modified** — Windows identity is now projected at the wire level only; internal hostname and config files are untouched
+- **Network persona layer** replaces naive hostname/fingerprint spoofing:
+  - sysctl tuning: TTL=128, tcp_timestamps=0, tcp_sack=1, tcp_ecn=0, window buffers for wscale=8
+  - iptables `IDSPOOF_WINEMU` mangle chain: TTL-set + MSS=1460 clamp on SYN packets
+  - NFQUEUE (queue 42): pure-Go packet rewriter — rewrites IP ID (0→incrementing) and TCP options to Windows order (`MSS,NOP,WScale,NOP,NOP,SACKPermitted`)
+  - DHCP Option 12 (hostname) + Option 60 (`MSFT 5.0` vendor class) via NetworkManager dropin or dhclient.conf
+  - mDNS: Avahi daemon stopped to suppress real hostname broadcast
+- **Cross-platform architecture** — Go build tags (`//go:build linux`) with macOS and Windows stubs ready for Phase 4–5
+- **Cobra CLI** with subcommands: `apply`, `restore`, `status`, `menu`, `version`
+- **Atomic state file** at `/var/log/idspoof/state.env` — backward-compatible with Bash v1 format
+- Legacy Bash scripts preserved in `idspoof/legacy/` for reference
+
+### Added
+
+- `idspoof apply --netident-only` — apply Windows network persona without touching MACs
+- `idspoof apply --dry-run` — preview changes without applying
+- `idspoof restore --netident` — roll back only network persona
+- `--debug` and `--log FILE` global flags
+- Screenshots in `assets/images/`
+
+### Removed
+
+- `emergency-uninstall.sh` — superseded by `idspoof restore`
+- `CODE_REVIEW.md` — all issues resolved by the Go rewrite
+- GUI/zenity support — CLI-only in v2 (TUI menu via `idspoof menu`)
+
+---
+
 ## [1.0.0] - 2025-06-06
 
 ### Added

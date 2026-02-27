@@ -1,256 +1,192 @@
 <div align="center">
   <img src="assets/images/logo.png" alt="ID-Spoofer Logo" width="400"/>
 
-# Linux Identity Spoofer v1.0
+# ID-Spoofer v2.0
 
 ![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
-![Version](https://img.shields.io/badge/version-1.0.0-green.svg)
-![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
-![Shell](https://img.shields.io/badge/shell-bash-orange.svg)
-![Status](https://img.shields.io/badge/status-stable-brightgreen.svg)
+![Version](https://img.shields.io/badge/version-2.0.0-green.svg)
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
+![Language](https://img.shields.io/badge/language-Go-00ADD8.svg)
+![Status](https://img.shields.io/badge/status-active-brightgreen.svg)
 
 </div>
 
-A comprehensive toolkit for spoofing hardware identifiers, MAC addresses, and system fingerprints to enhance anonymity during penetration testing and security assessments.
+A cross-platform identity spoofing toolkit for penetration testing and security assessments. Written in Go, ID-Spoofer randomizes MAC addresses and projects a convincing Windows network persona at the wire level — without touching the system hostname or breaking internal configuration.
 
-## Features
+## Screenshots
 
-- **MAC Address Spoofing**: Randomize MAC addresses for all network interfaces
-- **Hostname Modification**: Generate random Windows-like hostnames
-- **OS Fingerprint Obfuscation**: Modify TCP/IP stack parameters to appear like Windows
-- **System Information Spoofing**: Simulated hardware profile changes
-- **Graphical Interface**: GUI support when available, with fallback to CLI
-- **Modular Operation**: Run complete identity change or specific components
-- **Interactive Menu**: User-friendly menu system for easy operation
-- **Logging Support**: Optional logging of all actions
-- **Quiet Mode**: Silent operation for automated scripts
+<div align="center">
+
+**Applying Windows Network Persona**
+<img src="assets/images/screenshot2_persona.png" alt="Applying Windows network persona — DHCP hostname, TTL=128, MSS=1460, NFQUEUE active" width="800"/>
+
+*DHCP hostname injected, TTL set to 128, MSS=1460, NFQUEUE rewriting IP ID + TCP options. System hostname unchanged.*
+
+---
+
+**Status — Persona Active**
+<img src="assets/images/screenshot3_rewrite.png" alt="Status view showing IDSPOOF_WINEMU iptables chain and active NFQUEUE rewriter" width="800"/>
+
+*`idspoof status` after apply: IDSPOOF_WINEMU chain dumped, NFQUEUE rewriter confirmed active on queue 42.*
+
+---
+
+**Status — Clean State**
+<img src="assets/images/screenshot1_status.png" alt="Status view before apply — no iptables rules, NFQUEUE not active" width="800"/>
+
+*Before apply: sysctl already at Windows values (TTL=128, timestamps=0) but no iptables rules and NFQUEUE not running.*
+
+</div>
+
+## How it works
+
+The key design principle: **your system hostname is never modified**. Instead, ID-Spoofer manipulates the network stack so that passive observers (p0f, Nmap, Wireshark) see a Windows 10/11 machine.
+
+### Network persona layers
+
+When you run `idspoof apply`, five layers activate simultaneously:
+
+| Layer | What changes | Effect |
+|-------|-------------|--------|
+| **sysctl** | TTL=128, tcp_timestamps=0, tcp_sack=1, tcp_ecn=0, window buffers | Kernel-level Windows TCP/IP parameters |
+| **iptables** | `IDSPOOF_WINEMU` mangle chain | Forces TTL=128 on outgoing packets, clamps MSS=1460 on SYN |
+| **NFQUEUE** (queue 42) | Intercepts outgoing SYN packets | Rewrites IP ID (Linux=0 → incrementing, Windows style) and reorders TCP options to Windows layout |
+| **DHCP** | Option 12 (hostname) + Option 60 (`MSFT 5.0` vendor class) | Router and DHCP server see a Windows machine with a fake hostname |
+| **mDNS** | Stops Avahi daemon | Suppresses real hostname broadcast on the local network |
+
+The TCP options rewrite matches the exact Windows 10/11 SYN signature: `MSS, NOP, WScale, NOP, NOP, SACKPermitted` — defeating p0f fingerprinting. The NFQUEUE rewriter is pure Go with no CGo and no external C libraries.
+
+**p0f signature after apply:** `*:128:0:*:65535,8:mss,nop,ws,nop,nop,sok:df,id+:0`
 
 ## Requirements
 
-- Linux distribution (tested on Kali Linux, Ubuntu, Debian)
+- Linux (Phases 4–5 will add macOS and Windows support)
 - Root privileges
-- bash shell
-- Core utilities: `macchanger`, `net-tools`, `iproute2`
-- Optional GUI components: `zenity`, `libnotify-bin`
+- `macchanger` — for MAC address changes
+- `iproute2` — interface management
+- `iptables` — packet mangling rules
+- NetworkManager or dhclient — DHCP hostname injection
+- Optional: `avahi-daemon` (stopped during persona apply)
 
 ## Installation
 
-### Quick Install
+### From binary (recommended)
 
 ```bash
-# Clone the repository
-git clone https://github.com/nublex/id-spoofer.git
-cd id-spoofer
-
-# Run the installer
-sudo ./install.sh
+# Download the latest release for your platform
+curl -sL https://github.com/NubleX/id-spoofer/releases/latest/download/idspoof_linux_amd64 -o idspoof
+chmod +x idspoof
+sudo mv idspoof /usr/local/bin/
 ```
 
-### Manual Installation
+### Build from source
 
 ```bash
-# Install dependencies
-sudo apt-get update
-sudo apt-get install -y macchanger net-tools iproute2 zenity libnotify-bin
+git clone https://github.com/NubleX/id-spoofer.git
+cd id-spoofer/idspoof
+make build
+sudo cp bin/idspoof /usr/local/bin/
+```
 
-# Make scripts executable
-chmod +x src/bin/*.sh
-chmod +x install.sh
+Go 1.22+ required. If Go is not installed:
 
-# Install manually
-sudo cp src/bin/hardware-spoof.sh /usr/local/bin/
-sudo cp src/bin/idspoof-menu.sh /usr/local/bin/
-sudo chmod +x /usr/local/bin/hardware-spoof.sh
-sudo chmod +x /usr/local/bin/idspoof-menu.sh
-sudo ln -sf /usr/local/bin/hardware-spoof.sh /usr/local/bin/idspoof
+```bash
+curl -sL https://go.dev/dl/go1.22.4.linux-amd64.tar.gz | tar -xz -C ~/.go --strip-components=1
+export PATH="$HOME/.go/bin:$PATH"
 ```
 
 ## Usage
 
-### Command Line Interface
-
-#### Basic Usage
+All commands require root.
 
 ```bash
-# Full identity spoofing (interactive)
-sudo idspoof
+# Full identity spoof: MAC + Windows network persona + sysinfo
+sudo idspoof apply
 
-# Full identity spoofing with GUI
-sudo idspoof --gui
+# MAC addresses only
+sudo idspoof apply --mac-only
 
-# Spoof only MAC addresses
-sudo idspoof --mac-only
+# Windows network persona only (TCP/IP + DHCP + NFQUEUE)
+sudo idspoof apply --netident-only
 
-# Spoof only hostname
-sudo idspoof --hostname-only
+# Preview changes without applying
+sudo idspoof apply --dry-run
 
-# Silent operation (no prompts)
-sudo idspoof --quiet
+# Show current state vs saved originals
+sudo idspoof status
 
-# With logging
-sudo idspoof --log /var/log/idspoof.log
+# Roll back everything
+sudo idspoof restore
+
+# Roll back only MAC addresses
+sudo idspoof restore --mac
+
+# Roll back only network persona
+sudo idspoof restore --netident
+
+# Interactive TUI menu
+sudo idspoof menu
+
+# Version info
+idspoof version
 ```
 
-#### Interactive Menu
+### Global flags
+
+```
+--quiet        Suppress output, skip confirmations
+--debug        Verbose logging
+--log FILE     Log to file
+--state-dir    State directory (default: /var/log/idspoof)
+```
+
+### Verifying the persona
+
+Use tcpdump or Wireshark to capture a SYN packet and inspect:
+- IP TTL should be 128
+- IP ID should be non-zero and incrementing (not 0)
+- TCP options order: MSS → NOP → WScale → NOP → NOP → SACKPermitted
+- TCP window: 65535, scale factor 8
 
 ```bash
-# Launch interactive menu
-sudo idspoof-menu.sh
+sudo tcpdump -i any -nn 'tcp[tcpflags] & tcp-syn != 0' -X
 ```
 
-### Available Options
+## State management
 
-| Option | Description |
-|--------|-------------|
-| `--gui` | Use GUI elements if available |
-| `--mac-only` | Only spoof MAC addresses |
-| `--hostname-only` | Only spoof hostname |
-| `--quiet` | No interactive prompts or output |
-| `--log FILE` | Log actions to specified file |
-| `--help` | Show help message |
+State is stored in `/var/log/idspoof/state.env` — an atomic key=value file backward-compatible with the v1 Bash format. Keys include `ORIG_MACS`, `ORIG_TTL`, `ORIG_TCP_TIMESTAMPS`, and related sysctl originals. `restore` uses these to fully roll back.
 
-## Use Cases
+## Architecture
 
-- **Penetration Testing**: Evade network monitoring and detection systems
-- **Privacy Enhancement**: Reduce trackable hardware fingerprints
-- **Security Research**: Test network security and monitoring capabilities
-- **Digital Forensics**: Simulate different system configurations
-- **Red Team Operations**: Maintain operational security during assessments
+The Go rewrite (`idspoof/`) replaces the original Bash scripts with a structured, cross-platform binary:
 
-## ⚠️ Legal Disclaimer
-
-This tool is intended for:
-
-- ✅ Penetration testing on systems you own or have explicit permission to test
-- ✅ Educational purposes and security research
-- ✅ Protecting your privacy on your own systems
-- ✅ Authorized security assessments
-
-**Do NOT use this tool for:**
-
-- ❌ Unauthorized access to systems
-- ❌ Illegal activities or malicious purposes
-- ❌ Circumventing security measures without permission
-
-Users are responsible for ensuring their use complies with all applicable laws and regulations.
-
-## Technical Details
-
-### MAC Address Spoofing
-
-- Generates random MAC addresses with vendor-neutral prefixes
-- Supports all network interfaces except loopback
-- Safely disables/enables interfaces during the process
-
-### Hostname Spoofing
-
-- Creates Windows-like hostnames (WIN-XXXXXX, PC-XXXXXX, etc.)
-- Updates `/etc/hostname` and `/etc/hosts`
-- Maintains system consistency
-
-### OS Fingerprint Modification
-
-- Modifies TCP/IP stack parameters:
-  - Sets TTL to 128 (Windows-like)
-  - Disables TCP timestamps
-  - Disables TCP window scaling
-
-### System Profile Spoofing
-
-- Simulates hardware manufacturer information
-- Generates realistic system identifiers
-- Creates temporary profile data
-
-## Troubleshooting
-
-### Common Issues
-
-**"Permission denied" errors:**
-
-```bash
-# Ensure you're running as root
-sudo idspoof
+```
+cmd/idspoof/          CLI commands (cobra): apply, restore, status, menu, version
+internal/
+  mac/                MAC generation and Linux interface manipulation
+  netident/           Windows network persona: sysctl, iptables, NFQUEUE, DHCP, mDNS
+  spoofer/            Orchestrator: runs selected operations, collects results
+  state/              Atomic key=value state file (bash v1 compatible)
+  platform/           Platform abstraction + privilege checks
+  ui/                 Banner, colors, confirm prompt, progress
+  sysinfo/            Fake hardware profile generation (display-only)
+legacy/               Original Bash scripts preserved for reference
 ```
 
-**Missing dependencies:**
+The original Bash toolkit is preserved in `legacy/` and in the `master` branch history.
 
-```bash
-# Reinstall dependencies
-sudo apt-get install -y macchanger net-tools iproute2
-```
+## Roadmap
 
-**Network connectivity issues after spoofing:**
+- [x] Phase 1–2: Go core + Linux MAC/netident/sysinfo
+- [x] Phase 3: CLI commands (apply, restore, status, menu)
+- [ ] Phase 4: macOS (ifconfig, scutil, sysctl net.inet.ip.ttl)
+- [ ] Phase 5: Windows (registry MAC, WMI hostname, Tcpip\Parameters)
+- [ ] Phase 6: GitHub Actions CI + goreleaser multi-platform releases
 
-```bash
-# Restart network manager
-sudo systemctl restart NetworkManager
-# Or restore original MAC addresses
-sudo idspoof-menu.sh  # Option 5
-```
+## Legal disclaimer
 
-**GUI components not working:**
-
-```bash
-# Install GUI dependencies
-sudo apt-get install -y zenity libnotify-bin
-```
-
-### Debug Mode
-
-```bash
-# Run with verbose output
-bash -x /usr/local/bin/hardware-spoof.sh
-```
-
-## 📝 Changelog
-
-### Version 1.0.0 (2025-06-06)
-
-- ✨ Initial stable release
-- ✨ Complete MAC address spoofing functionality
-- ✨ Hostname randomization with Windows-like patterns
-- ✨ OS fingerprint obfuscation
-- ✨ GUI support with zenity integration
-- ✨ Interactive menu system
-- ✨ Logging capabilities
-- ✨ Quiet mode for automation
-- ✨ Comprehensive error handling
-- ✨ Desktop integration
-- 🐛 Fixed network interface detection
-- 🐛 Improved error handling for missing dependencies
-- 📚 Enhanced documentation and help system
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-### Development Setup
-
-```bash
-git clone https://github.com/nublex/id-spoofer.git
-cd id-spoofer
-# Make your changes
-# Test thoroughly on a safe system
-# Submit a pull request
-```
-
-## License
-
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- The open-source security community
-- Contributors to the macchanger project
-- Linux kernel networking stack developers
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/nublex/id-spoofer/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/nublex/id-spoofer/discussions)
-- **Security Issues**: Please report responsibly via private channels
+For penetration testing on systems you own or have explicit written permission to test, security research, and authorized red team assessments only. Users are responsible for compliance with applicable laws.
 
 ---
-Visit https://www.idarti.com
 
-## Made with ❤️ for the cybersecurity community
+Visit https://www.idarti.com
