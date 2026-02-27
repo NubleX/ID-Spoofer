@@ -13,6 +13,14 @@
 
 A cross-platform identity spoofing toolkit for penetration testing and security assessments. Written in Go, ID-Spoofer randomizes MAC addresses and projects a convincing Windows network persona at the wire level — without touching the system hostname or breaking internal configuration.
 
+## Demo
+
+<div align="center">
+  <img src="assets/images/idspoof_final.gif" width="800" alt="ID-Spoofer interactive TUI demo"/>
+  <br/>
+  <sub><b>ID-Spoofer</b> — Windows 10/11 TCP/IP identity projection, wire-level, zero hostname changes &nbsp;·&nbsp; <a href="https://www.idarti.com">idarti.com</a></sub>
+</div>
+
 ## Screenshots
 
 <div align="center">
