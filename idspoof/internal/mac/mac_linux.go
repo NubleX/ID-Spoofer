@@ -70,12 +70,16 @@ func (s *linuxSpoofer) Apply(origIfaces []InterfaceMAC) ([]InterfaceMAC, error) 
 	var failed bool
 	for _, iface := range origIfaces {
 		newMAC := GenerateRandom()
-		if err := exec.Command("macchanger", "-m", newMAC, iface.Name).Run(); err != nil {
+		hw, err := net.ParseMAC(newMAC)
+		if err != nil {
+			failed = true
+			break
+		}
+		if err := setMAC(iface.Name, hw); err != nil {
 			failed = true
 			break
 		}
 
-		hw, _ := net.ParseMAC(newMAC)
 		if err := s.Verify(iface.Name, hw); err != nil {
 			failed = true
 			break
@@ -109,7 +113,12 @@ func (s *linuxSpoofer) Restore(ifaces []InterfaceMAC) error {
 	var lastErr error
 	for _, iface := range ifaces {
 		exec.Command("ip", "link", "set", iface.Name, "down").Run()
-		if err := exec.Command("macchanger", "-m", iface.MAC, iface.Name).Run(); err != nil {
+		hw, err := net.ParseMAC(iface.MAC)
+		if err != nil {
+			lastErr = fmt.Errorf("parse MAC for %s: %w", iface.Name, err)
+			continue
+		}
+		if err := setMAC(iface.Name, hw); err != nil {
 			lastErr = fmt.Errorf("restore MAC for %s: %w", iface.Name, err)
 			continue
 		}
