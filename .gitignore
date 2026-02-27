@@ -30,6 +30,7 @@ credentials/
 .vscode/
 .idea/
 .cursor/
+.claude/
 
 # Claude Code
 CLAUDE.md
