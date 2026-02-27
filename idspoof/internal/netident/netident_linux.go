@@ -24,10 +24,14 @@ func (s *linuxSpoofer) Current() (*Snapshot, error) {
 	return snap, nil
 }
 
-// Apply projects the Windows persona on the wire.
+// Apply projects the selected persona on the wire.
 // The system hostname is NEVER modified — we only change what goes on the wire.
 func (s *linuxSpoofer) Apply(p Persona) error {
 	var errs []string
+
+	// Store the active persona type so the NFQUEUE rewriter goroutine can
+	// build the correct TCP options layout.
+	activePersona.Store(p.Type)
 
 	// 1. Sysctl — TCP/IP stack parameters (TTL, timestamps, SACK, ECN, buffers).
 	if sysctlErrs := applySysctl(&p); len(sysctlErrs) > 0 {
@@ -40,9 +44,9 @@ func (s *linuxSpoofer) Apply(p Persona) error {
 	}
 
 	// 3. NFQUEUE packet rewriter — IP ID + TCP options ordering.
-	//    This is the deep evasion layer that defeats Nmap/p0f:
-	//      - Rewrites IP ID from 0 (Linux with DF) to incrementing (Windows)
-	//      - Reorders TCP options on SYN packets to Windows layout
+	//    Rewrites SYN packets to match the target OS:
+	//      - IP ID: 0 → incrementing (both Windows and macOS)
+	//      - TCP options: reordered to target OS layout
 	if err := installNFQueueRule(); err != nil {
 		errs = append(errs, fmt.Sprintf("nfqueue rule: %v", err))
 	} else {
@@ -53,14 +57,14 @@ func (s *linuxSpoofer) Apply(p Persona) error {
 		}
 	}
 
-	// 4. DHCP — announce Windows hostname + MSFT 5.0 vendor class.
+	// 4. DHCP — announce persona hostname + optional vendor class.
 	snap := &Snapshot{}
 	if err := applyDHCP(&p, snap); err != nil {
 		errs = append(errs, fmt.Sprintf("dhcp: %v", err))
 	}
 
-	// 5. mDNS — suppress Avahi so it doesn't leak the real hostname.
-	suppressMDNS(snap)
+	// 5. mDNS — persona-dependent Avahi handling.
+	handleMDNS(&p, snap)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("network persona (partial): %s", strings.Join(errs, "; "))

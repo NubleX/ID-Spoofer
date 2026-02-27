@@ -10,11 +10,11 @@ import (
 
 // Chain name used for our rules so we can cleanly add/remove without
 // disturbing existing firewall config.
-const chainName = "IDSPOOF_WINEMU"
+const chainName = "IDSPOOF_NETEMU"
 
 // applyIPTables creates a mangle chain with rules that make outgoing packets
-// look like Windows 10/11:
-//   - TTL set to 128 (belt-and-suspenders with sysctl)
+// match the target OS persona:
+//   - TTL set to persona value (128 for Windows, 64 for macOS/iOS)
 //   - MSS clamped to 1460 on SYN packets
 func applyIPTables(p *Persona) error {
 	// Create our chain (ignore error if already exists).
@@ -58,6 +58,11 @@ func removeIPTables() error {
 	// Flush and delete our chain.
 	exec.Command("iptables", "-t", "mangle", "-F", chainName).Run()
 	exec.Command("iptables", "-t", "mangle", "-X", chainName).Run()
+
+	// Backward compat: also clean up old v2.0.0 chain name if present.
+	exec.Command("iptables", "-t", "mangle", "-D", "POSTROUTING", "-j", "IDSPOOF_WINEMU").Run()
+	exec.Command("iptables", "-t", "mangle", "-F", "IDSPOOF_WINEMU").Run()
+	exec.Command("iptables", "-t", "mangle", "-X", "IDSPOOF_WINEMU").Run()
 
 	return nil
 }
