@@ -9,6 +9,7 @@ import (
 	"github.com/NubleX/idspoof/internal/logging"
 	"github.com/NubleX/idspoof/internal/mac"
 	"github.com/NubleX/idspoof/internal/netident"
+	"github.com/NubleX/idspoof/internal/netrecon"
 	"github.com/NubleX/idspoof/internal/platform"
 	"github.com/NubleX/idspoof/internal/state"
 	"github.com/NubleX/idspoof/internal/tunnel"
@@ -29,8 +30,19 @@ func New(plat platform.Platform, st state.Manager, logger *logging.Logger) *Orch
 }
 
 // Apply runs the spoofing operations described by opts. Returns one Result per operation.
+// Before executing, it runs a network recon probe and logs any warnings.
 func (o *Orchestrator) Apply(opts Options) []Result {
 	var results []Result
+
+	// Pre-flight: detect existing VPNs/tunnels that may conflict.
+	if warnings := o.preflight(opts); len(warnings) > 0 {
+		for _, w := range warnings {
+			o.logger.Warn("pre-flight", "warning", w)
+			if !opts.Quiet {
+				fmt.Printf("  %s %s\n", ui.Yellow("!"), w)
+			}
+		}
+	}
 
 	if opts.MAC {
 		results = append(results, o.applyMAC(opts.DryRun, opts.Quiet))
@@ -338,6 +350,17 @@ func (o *Orchestrator) restoreTunnel(quiet bool) Result {
 		ui.Progress("Tunnel stopped", 100)
 	}
 	return Result{Operation: OpTunnel, Success: true, Details: "tunnel stopped"}
+}
+
+// preflight runs a network probe and returns conflict warnings.
+func (o *Orchestrator) preflight(opts Options) []string {
+	prober := netrecon.NewProber()
+	ns, err := prober.Probe()
+	if err != nil {
+		o.logger.Warn("pre-flight probe failed", "err", err)
+		return nil
+	}
+	return ns.Warnings
 }
 
 // Helpers.
