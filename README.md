@@ -183,6 +183,13 @@ The original Bash toolkit is preserved in `legacy/` and in the `master` branch h
 - [ ] Phase 5: Windows (registry MAC, WMI hostname, Tcpip\Parameters)
 - [ ] Phase 6: GitHub Actions CI + goreleaser multi-platform releases
 
+## Acknowledgements
+
+Thanks to the teams whose open-source work makes this possible:
+
+- **[Charm](https://github.com/charmbracelet)** — [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss) power the interactive TUI. Genuinely excellent libraries.
+- **[spf13/cobra](https://github.com/spf13/cobra)** — the CLI framework behind every subcommand.
+
 ## Legal disclaimer
 
 For penetration testing on systems you own or have explicit written permission to test, security research, and authorized red team assessments only. Users are responsible for compliance with applicable laws.
