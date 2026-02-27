@@ -1,10 +1,10 @@
 <div align="center">
   <img src="assets/images/logo.png" alt="ID-Spoofer Logo" width="400"/>
 
-# ID-Spoofer v2.0.2
+# ID-Spoofer v2.0.3
 
 ![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
-![Version](https://img.shields.io/badge/version-2.0.2-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.3-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
 ![Language](https://img.shields.io/badge/language-Go-00ADD8.svg)
 ![Status](https://img.shields.io/badge/status-active-brightgreen.svg)
@@ -24,6 +24,11 @@ A cross-platform identity spoofing toolkit for penetration testing and security 
 ## Screenshots
 
 <div align="center">
+
+**New Dashboard 2.0.3**
+<img src="assets/images/screenshot0_dashboard.png" alt="New dashboard showing active connections for ease of management" width="800"/>
+
+---
 
 **Applying Network Persona**
 <img src="assets/images/screenshot2_persona.png" alt="Applying network persona — DHCP hostname, TTL, MSS=1460, NFQUEUE active" width="800"/>
