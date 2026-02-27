@@ -5,6 +5,40 @@ All notable changes to the ID-Spoofer project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-02-27
+
+### Added
+
+- **Multi-OS network personas** — Windows 10/11, macOS (Sonoma+), Linux (Ubuntu/Arch/Fedora), iOS 17+
+  - `--persona windows|macos|linux|ios` CLI flag; persona radio selector in TUI
+  - Each persona projects the correct TTL, TCP timestamps, TCP options order, DHCP hostname style, and mDNS behaviour
+  - Linux persona: TTL=64, timestamps=1, TCP options in kernel order (`MSS,SACK,TS,NOP,WScale`), WScale=7, distro-style DHCP hostnames
+  - macOS persona: TTL=64, timestamps=1, TCP options `MSS,NOP,WS,NOP,NOP,TS,SOK`, no DHCP vendor class, Avahi left running
+  - iOS persona: same as macOS with WScale=16
+- **Protocol encapsulation** — 8 tunnel protocols managed via `--tunnel` flag or TUI
+  - `tor` — onion routing, transparent or SOCKS5 mode; torrc generated on the fly; bootstrap polling
+  - `wireguard` — wg-quick wrapper, transparent routing via WireGuard interface
+  - `lwo` — WireGuard with Lightweight Obfuscation (ObfuscateKey config option, Mullvad-compatible)
+  - `i2p` — i2pd garlic routing, SOCKS5 :4447 / HTTP :4444 / transparent via outproxy
+  - `shadowsocks` — sslocal/ss-local AEAD proxy, redir mode or SOCKS5 :1080
+  - `quic` — Hysteria2 UDP tunnel, transparent tproxy or SOCKS5 :1080
+  - `tor-over-vpn` — WireGuard up first, Tor routed through VPN
+  - `vpn-over-tor` — Tor up first (SOCKS), WireGuard routed through Tor
+  - `--tunnel-mode transparent|socks`, `--tunnel-config PATH`
+- **Granular apply flags** — `--mac`, `--netident`, `--sysinfo` (combinable); no-flag default runs all three
+- **TUI sections** — Network Persona radio group + Traffic Encapsulation radio group with per-item descriptions
+- **Tor distro portability** — auto-detects tor daemon user (`debian-tor` / `tor` / `_tor`) from `/etc/passwd` to prevent routing loops on non-Debian systems; polls SOCKS port for bootstrap readiness (up to 90s) instead of blind sleep
+
+### Changed
+
+- iptables chain renamed `IDSPOOF_WINEMU` → `IDSPOOF_NETEMU` (generic, backward-compat cleanup on restore)
+- DHCP dropin renamed `90-idspoof-windows.conf` → `90-idspoof-persona.conf`; vendor class (Option 60) only injected for Windows persona
+- Avahi suppression is now conditional: stopped for Windows, left running for macOS/Linux/iOS
+- `apply --mac-only` / `--netident-only` replaced with composable `--mac`, `--netident`, `--sysinfo` flags matching `restore` syntax
+- NFQUEUE rewriter now persona-aware via `activePersona atomic.Value`; wscale extracted from persona (7/8/16) rather than hardcoded
+
+---
+
 ## [2.0.0] - 2026-02-27
 
 ### Changed
