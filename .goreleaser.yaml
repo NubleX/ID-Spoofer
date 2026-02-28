@@ -4,11 +4,12 @@ project_name: idspoof
 
 before:
   hooks:
-    - go mod tidy
+    - cmd: go mod tidy
+      dir: idspoof
 
 builds:
   - id: idspoof
-    main: ./cmd/idspoof
+    main: ./idspoof/cmd/idspoof
     binary: idspoof
     env:
       - CGO_ENABLED=0
@@ -34,7 +35,6 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
-      - scripts/install.sh
 
 checksum:
   name_template: "checksums.txt"
@@ -45,3 +45,8 @@ release:
     name: idspoof
   draft: false
   prerelease: auto
+  footer: |
+    ---
+    **Igor Dunaev (NubleX)** · [idarti.com](https://www.idarti.com) · [GitHub](https://github.com/NubleX)
+
+    > Download the binary for your platform above, verify with `checksums.txt`, and run with `sudo`.
