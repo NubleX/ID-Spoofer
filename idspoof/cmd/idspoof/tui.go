@@ -20,10 +20,11 @@ const (
 	tabDashboard tab = iota
 	tabIdentity
 	tabTunnel
+	tabTraffic
 	tabStatus
 )
 
-var tabNames = []string{"Dashboard", "Identity", "Tunnel", "Status"}
+var tabNames = []string{"Dashboard", "Identity", "Tunnel", "Traffic", "Status"}
 
 // ── Main TUI model ──────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ type mainModel struct {
 	dashboard dashboardModel
 	identity  identityModel
 	tunnel    tunnelModel
+	traffic   trafficModel
 	status    statusModel
 
 	lastMsg string
@@ -51,12 +53,13 @@ func newMainModel() mainModel {
 		dashboard: newDashboardModel(),
 		identity:  newIdentityModel(),
 		tunnel:    newTunnelModel(),
+		traffic:   newTrafficModel(),
 		status:    newStatusModel(),
 	}
 }
 
 func (m mainModel) Init() tea.Cmd {
-	return m.dashboard.Init()
+	return tea.Batch(m.dashboard.Init(), m.traffic.Init())
 }
 
 func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -96,6 +99,10 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastMsg = ""
 			return m, nil
 		case "4":
+			m.activeTab = tabTraffic
+			m.lastMsg = ""
+			return m, nil
+		case "5":
 			m.activeTab = tabStatus
 			m.lastMsg = ""
 			return m, nil
@@ -124,10 +131,32 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.dashboard.spinner.Tick, probeNetwork)
 		}
 
-	// Route spinner/probe messages to dashboard.
-	case spinner.TickMsg, netProbeResult, netProbeTick:
+	// Route spinner ticks to both dashboard and traffic (they each have a spinner).
+	case spinner.TickMsg:
+		var cmd1, cmd2 tea.Cmd
+		m.dashboard, cmd1 = m.dashboard.Update(msg)
+		m.traffic, cmd2 = m.traffic.Update(msg)
+		if cmd1 != nil {
+			cmds = append(cmds, cmd1)
+		}
+		if cmd2 != nil {
+			cmds = append(cmds, cmd2)
+		}
+		return m, tea.Batch(cmds...)
+
+	// Route netrecon probe messages to dashboard.
+	case netProbeResult, netProbeTick:
 		var cmd tea.Cmd
 		m.dashboard, cmd = m.dashboard.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+
+	// Route traffic poll messages to traffic tab.
+	case trafficResult, trafficTick:
+		var cmd tea.Cmd
+		m.traffic, cmd = m.traffic.Update(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -151,6 +180,12 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tabTunnel:
 		var cmd tea.Cmd
 		m.tunnel, cmd = m.tunnel.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case tabTraffic:
+		var cmd tea.Cmd
+		m.traffic, cmd = m.traffic.Update(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -193,6 +228,8 @@ func (m mainModel) View() string {
 		b.WriteString(m.identity.View(contentWidth))
 	case tabTunnel:
 		b.WriteString(m.tunnel.View(contentWidth))
+	case tabTraffic:
+		b.WriteString(m.traffic.View(contentWidth))
 	case tabStatus:
 		b.WriteString(m.status.View(contentWidth))
 	}
@@ -247,7 +284,7 @@ func (m mainModel) renderHelpBar() string {
 		{"R", "Restore"},
 		{"S", "Scan"},
 		{"Tab", "Switch"},
-		{"1-4", "Jump"},
+		{"1-5", "Jump"},
 		{"\u2191\u2193/jk", "Nav"},
 		{"Space", "Toggle"},
 		{"Q", "Quit"},
