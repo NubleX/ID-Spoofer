@@ -289,6 +289,18 @@ func (m mainModel) renderHelpBar() string {
 		{"Space", "Toggle"},
 		{"Q", "Quit"},
 	}
+	if m.activeTab == tabTraffic {
+		keys = []struct{ key, desc string }{
+			{"A", "Apply"},
+			{"R", "Restore"},
+			{"S", "Scan"},
+			{"Tab", "Switch"},
+			{"1-5", "Jump"},
+			{"j/k", "Scroll conns"},
+			{"g/G", "Top/Bottom"},
+			{"Q", "Quit"},
+		}
+	}
 	var parts []string
 	for _, k := range keys {
 		parts = append(parts,
