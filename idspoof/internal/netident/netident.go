@@ -20,6 +20,7 @@ const (
 	PersonaMacOS   PersonaType = "macos"
 	PersonaiOS     PersonaType = "ios"
 	PersonaLinux   PersonaType = "linux"
+	PersonaAndroid PersonaType = "android"
 )
 
 // Persona describes the full network identity to project.
@@ -138,6 +139,32 @@ func LinuxPersona(hostname string) Persona {
 		WmemDefault:      212992,
 		WmemMax:          4194304,
 		DHCPVendorClass:  "", // no vendor class
+		SuppressMDNS:     false,
+	}
+}
+
+// AndroidPersona returns a Persona that matches an Android 12+ device on the wire.
+// Android uses the Linux kernel so TCP options order is identical to Linux, but
+// the parameters differ: ECN=0 (disabled by default in most ROMs), WScale=8
+// (typical Android WiFi), and mobile-tuned socket buffers.
+// p0f: *:64:0:*:65535,8:mss,sackOK,ts,nop,ws:df,id+:0
+func AndroidPersona(hostname string) Persona {
+	return Persona{
+		Type:             PersonaAndroid,
+		Hostname:         hostname,
+		TTL:              64,
+		TCPTimestamps:    1,
+		TCPWindowScaling: 1,
+		TCPSACK:          1,
+		TCPECN:           0, // ECN disabled by default in Android ROMs
+		TCPRFC1337:       0,
+		MSS:              1460,
+		WScale:           8, // typical Android WiFi — distinct from desktop Linux (7)
+		RmemDefault:      87380,
+		RmemMax:          6291456, // 6 MB — mobile-optimised
+		WmemDefault:      87380,
+		WmemMax:          6291456,
+		DHCPVendorClass:  "", // Android sends no vendor class
 		SuppressMDNS:     false,
 	}
 }

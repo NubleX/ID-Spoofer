@@ -128,6 +128,8 @@ func personaWScale(p PersonaType) uint8 {
 		return 16
 	case PersonaLinux:
 		return 7
+	case PersonaAndroid:
+		return 8 // Android WiFi typical — explicit for clarity
 	default: // Windows, macOS
 		return 8
 	}
@@ -166,7 +168,9 @@ func buildTCPOptions(persona PersonaType, mss uint16, wscale uint8, origOpts []b
 			tsEcr = 0
 		}
 		return macosTCPOptions(mss, wscale, tsVal, tsEcr)
-	case PersonaLinux:
+	case PersonaLinux, PersonaAndroid:
+		// Android uses the Linux kernel — same TCP options order.
+		// Parameters differ (see AndroidPersona) but byte layout is identical.
 		tsVal, tsEcr, found := extractTimestamp(origOpts)
 		if !found {
 			tsVal = 1

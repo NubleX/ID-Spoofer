@@ -18,6 +18,10 @@ var (
 	// Common first names for Apple-style hostnames ("Admins-MacBook-Pro").
 	appleNames = []string{"Admin", "User", "Guest", "Office", "Home", "Work", "Dev"}
 
+	// Android device DHCP hostname prefixes. Actual devices use the pattern
+	// "android-XXXXXXXXXXXXXXXX" or manufacturer-prefixed variants.
+	androidPrefixes = []string{"android", "samsung", "pixel", "oneplus", "xiaomi"}
+
 	// Linux distro-style hostnames: "distro-descriptor" patterns typical of
 	// default installs. Installer-generated or user-set during setup.
 	linuxHostnames = []string{
@@ -60,6 +64,14 @@ func GenerateRandomIOS() string {
 	return fmt.Sprintf("%ss-%s", name, device)
 }
 
+// GenerateRandomAndroid produces an Android-style DHCP hostname, e.g.
+// "android-a3f9kl2d7b8e1c4f" or "samsung-d3b2a1c4e5f60789".
+func GenerateRandomAndroid() string {
+	prefix := pick(androidPrefixes)
+	suffix := randomHex(16)
+	return fmt.Sprintf("%s-%s", prefix, suffix)
+}
+
 // GenerateRandomLinux produces a hostname matching common Linux distro naming
 // patterns used by default installers (Ubuntu, Fedora, Arch, Debian, etc.).
 func GenerateRandomLinux() string {
@@ -88,6 +100,20 @@ func pick(list []string) string {
 		return list[0]
 	}
 	return list[n.Int64()]
+}
+
+func randomHex(length int) string {
+	const hexChars = "0123456789abcdef"
+	b := make([]byte, length)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(hexChars))))
+		if err != nil {
+			b[i] = '0'
+			continue
+		}
+		b[i] = hexChars[n.Int64()]
+	}
+	return string(b)
 }
 
 func randomAlphaNum(length int) string {

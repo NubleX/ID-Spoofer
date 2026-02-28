@@ -1,10 +1,10 @@
 <div align="center">
   <img src="assets/images/logo.png" alt="ID-Spoofer Logo" width="400"/>
 
-# ID-Spoofer v2.0.3
+# ID-Spoofer v2.0.4
 
 ![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
-![Version](https://img.shields.io/badge/version-2.0.3-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.4-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
 ![Language](https://img.shields.io/badge/language-Go-00ADD8.svg)
 ![Status](https://img.shields.io/badge/status-active-brightgreen.svg)
@@ -259,8 +259,8 @@ The original Bash toolkit is preserved in `legacy/` and in the `master` branch h
 - [x] Phase 1–2: Go core + Linux MAC/netident/sysinfo
 - [x] Phase 3: CLI commands (apply, restore, status, menu)
 - [x] Phase 4: Multi-OS personas (Windows, macOS, iOS) + protocol encapsulation (8 tunnel protocols)
-- [ ] Phase 5: macOS native (ifconfig, scutil, sysctl net.inet.ip.ttl)
-- [ ] Phase 6: Windows native (registry MAC, WMI hostname, Tcpip\Parameters)
+- [x] Phase 5: macOS native (ifconfig, scutil, sysctl net.inet.ip.ttl)
+- [x] Phase 6: Windows native (registry MAC, WMI hostname, Tcpip\Parameters)
 - [ ] Phase 7: GitHub Actions CI + goreleaser multi-platform releases
 
 ## Acknowledgements
