@@ -8,7 +8,8 @@ before:
 
 builds:
   - id: idspoof
-    main: ./idspoof/cmd/idspoof
+    main: ./cmd/idspoof
+    dir: idspoof
     binary: idspoof
     env:
       - CGO_ENABLED=0
