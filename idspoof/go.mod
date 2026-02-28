@@ -1,4 +1,4 @@
-module github.com/NubleX/idspoof
+module github.com/NubleX/ID-Spoofer/idspoof
 
 go 1.24.2
 

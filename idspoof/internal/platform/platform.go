@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/NubleX/idspoof/internal/mac"
-	"github.com/NubleX/idspoof/internal/netident"
-	"github.com/NubleX/idspoof/internal/sysinfo"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/mac"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/netident"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/sysinfo"
 )
 
 // Platform aggregates all OS-specific spoofers.

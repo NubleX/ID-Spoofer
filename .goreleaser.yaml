@@ -22,9 +22,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/NubleX/idspoof/internal/config.Version={{.Version}}
-      - -X github.com/NubleX/idspoof/internal/config.Commit={{.Commit}}
-      - -X github.com/NubleX/idspoof/internal/config.BuildDate={{.Date}}
+      - -X github.com/NubleX/ID-Spoofer/idspoof/internal/config.Version={{.Version}}
+      - -X github.com/NubleX/ID-Spoofer/idspoof/internal/config.Commit={{.Commit}}
+      - -X github.com/NubleX/ID-Spoofer/idspoof/internal/config.BuildDate={{.Date}}
 
 archives:
   - id: default

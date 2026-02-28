@@ -1,6 +1,6 @@
 package spoofer
 
-import "github.com/NubleX/idspoof/internal/netident"
+import "github.com/NubleX/ID-Spoofer/idspoof/internal/netident"
 
 // Operation names for the result set.
 const (

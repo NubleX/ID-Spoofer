@@ -8,8 +8,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/NubleX/idspoof/internal/config"
-	"github.com/NubleX/idspoof/internal/spoofer"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/config"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/spoofer"
 )
 
 // ── Tab identifiers ─────────────────────────────────────────────────────────
