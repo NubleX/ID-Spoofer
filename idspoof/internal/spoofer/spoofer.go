@@ -187,6 +187,9 @@ func (o *Orchestrator) applyNetIdent(opts Options) Result {
 	case netident.PersonaLinux:
 		dhcpHostname = hostname.GenerateRandomLinux()
 		persona = netident.LinuxPersona(dhcpHostname)
+	case netident.PersonaAndroid:
+		dhcpHostname = hostname.GenerateRandomAndroid()
+		persona = netident.AndroidPersona(dhcpHostname)
 	default:
 		dhcpHostname = hostname.GenerateRandom()
 		persona = netident.WindowsPersona(dhcpHostname)

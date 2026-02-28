@@ -1,10 +1,10 @@
 <div align="center">
   <img src="assets/images/logo.png" alt="ID-Spoofer Logo" width="400"/>
 
-# ID-Spoofer v2.0.3
+# ID-Spoofer v2.0.4
 
 ![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
-![Version](https://img.shields.io/badge/version-2.0.3-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.4-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
 ![Language](https://img.shields.io/badge/language-Go-00ADD8.svg)
 ![Status](https://img.shields.io/badge/status-active-brightgreen.svg)
@@ -57,7 +57,7 @@ The key design principle: **your system hostname is never modified**. Instead, I
 
 ### Network personas
 
-Three personas are available, each projecting a different OS identity at the wire level:
+Five personas are available, each projecting a different OS identity at the wire level:
 
 | Persona | TTL | TCP Timestamps | Window Scale | TCP Options Order | DHCP Vendor Class | mDNS |
 |---------|-----|----------------|--------------|-------------------|-------------------|------|
@@ -65,6 +65,7 @@ Three personas are available, each projecting a different OS identity at the wir
 | **macOS** | 64 | Enabled | 8 | MSS, NOP, WS, NOP, NOP, TS, SOK | None | Avahi left running |
 | **Linux** | 64 | Enabled | 7 | MSS, SACK, TS, NOP, WS | None | Avahi left running |
 | **iOS** | 64 | Enabled | 16 | MSS, NOP, WS, NOP, NOP, TS, SOK | None | Avahi left running |
+| **Android** | 64 | Enabled | 8 | MSS, SACK, TS, NOP, WS | None | Avahi left running |
 
 ### Network persona layers
 
@@ -85,6 +86,7 @@ The NFQUEUE rewriter is pure Go with no CGo and no external C libraries. It buil
 - macOS: `*:64:0:*:65535,8:mss,nop,ws,nop,nop,ts,sok,eol+1:df,id+:0`
 - Linux: `*:64:0:*:29200,7:mss,sackOK,ts,nop,ws:df,id+:0`
 - iOS: `*:64:0:*:65535,16:mss,nop,ws,nop,nop,ts,sok,eol+1:df,id+:0`
+- Android: `*:64:0:*:65535,8:mss,sackOK,ts,nop,ws:df,id+:0`
 
 ### Protocol encapsulation
 
@@ -202,7 +204,7 @@ idspoof version
 ### Apply flags
 
 ```
---persona windows|macos|linux|ios   Network persona to project (default: windows)
+--persona windows|macos|linux|ios|android   Network persona to project (default: windows)
 --tunnel PROTOCOL             Tunnel protocol: tor, wireguard, i2p, shadowsocks, quic, lwo,
                               tor-over-vpn, vpn-over-tor
 --tunnel-mode MODE            transparent (default) or socks
@@ -258,9 +260,9 @@ The original Bash toolkit is preserved in `legacy/` and in the `master` branch h
 
 - [x] Phase 1–2: Go core + Linux MAC/netident/sysinfo
 - [x] Phase 3: CLI commands (apply, restore, status, menu)
-- [x] Phase 4: Multi-OS personas (Windows, macOS, iOS) + protocol encapsulation (8 tunnel protocols)
-- [ ] Phase 5: macOS native (ifconfig, scutil, sysctl net.inet.ip.ttl)
-- [ ] Phase 6: Windows native (registry MAC, WMI hostname, Tcpip\Parameters)
+- [x] Phase 4: Multi-OS personas (Windows, macOS, iOS, Android) + protocol encapsulation (8 tunnel protocols)
+- [x] Phase 5: macOS native (ifconfig, scutil, sysctl net.inet.ip.ttl)
+- [x] Phase 6: Windows native (registry MAC, WMI hostname, Tcpip\Parameters)
 - [ ] Phase 7: GitHub Actions CI + goreleaser multi-platform releases
 
 ## Acknowledgements
@@ -269,6 +271,7 @@ Thanks to the teams whose open-source work makes this possible:
 
 - **[Charm](https://github.com/charmbracelet)** — [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss) power the interactive TUI. Genuinely excellent libraries.
 - **[spf13/cobra](https://github.com/spf13/cobra)** — the CLI framework behind every subcommand.
+- **[pythops/oryx](https://github.com/pythops/oryx)** — TUI network traffic monitor whose design inspired the Traffic tab's live bandwidth and connection display.
 
 ## Legal disclaimer
 

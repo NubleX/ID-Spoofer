@@ -62,6 +62,11 @@ var identityItems = []checkItem{
 		descTitle: "iOS Persona",
 		description: "Projects an iOS 17+ fingerprint.\nNearly identical to macOS with\none key difference:\n\n\u2022 Window scale factor: 16 (vs 8)\n\nDHCP hostname uses iOS-style format\n(\"Users-iPhone\", \"Admins-iPad\").\nAll other params match macOS:\nTTL=64, timestamps, Bonjour.",
 	},
+	{
+		label: "Android 12+ (Phone/Tablet)", opKey: "persona-android", group: "persona",
+		descTitle: "Android Persona",
+		description: "Projects an Android 12+ network\nidentity at the wire level.\n\nAndroid uses the Linux kernel so\nTCP options order is identical, but\nparameters differ:\n\n\u2022 sysctl: TTL=64, timestamps=1,\n  wscale=8, ECN=0 (ROM default)\n\u2022 NFQUEUE: MSS,SACK,TS,NOP,WScale\n  (Linux kernel order)\n\u2022 DHCP: android-XXXXXXXXXXXXXXXX\n  style hostname\n\u2022 mDNS: left running\n\np0f: *:64:0:*:65535,8:mss,sackOK,\n     ts,nop,ws:df,id+:0",
+	},
 }
 
 // identityModel manages the identity + persona selection.
@@ -199,6 +204,9 @@ func (m identityModel) buildOpts() spoofer.Options {
 		case "persona-linux":
 			opts.NetIdent = true
 			opts.PersonaType = netident.PersonaLinux
+		case "persona-android":
+			opts.NetIdent = true
+			opts.PersonaType = netident.PersonaAndroid
 		}
 	}
 	return opts

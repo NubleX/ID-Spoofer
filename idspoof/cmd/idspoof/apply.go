@@ -21,7 +21,7 @@ a traffic tunnel, and generates a fake system hardware profile.
 With no operation flags, all three operations run: --mac --netident --sysinfo.
 Use individual flags to run a subset (e.g. --mac --netident skips sysinfo).
 
-Supported personas: windows (default), macos, ios.
+Supported personas: windows (default), macos, ios, linux, android.
 The system hostname is NEVER changed — the persona hostname is only announced
 via DHCP, keeping the internal system stable.`,
 	RunE: runApply,
@@ -44,7 +44,7 @@ func init() {
 	f.BoolVar(&applyOpts.netident, "netident", false, "Apply network persona (TCP/IP stack, DHCP, NFQUEUE)")
 	f.BoolVar(&applyOpts.sysinfo, "sysinfo", false, "Generate fake system hardware profile")
 	f.BoolVar(&applyOpts.dryRun, "dry-run", false, "Show what would change without applying")
-	f.StringVar(&applyOpts.persona, "persona", "windows", "Network persona to project (windows, macos, ios, linux)")
+	f.StringVar(&applyOpts.persona, "persona", "windows", "Network persona to project (windows, macos, ios, linux, android)")
 	f.StringVar(&applyOpts.tunnel, "tunnel", "", "Traffic encapsulation protocol (tor, wireguard, i2p, shadowsocks, quic, lwo, tor-over-vpn, vpn-over-tor)")
 	f.StringVar(&applyOpts.tunnelMode, "tunnel-mode", "transparent", "Tunnel routing mode (transparent, socks)")
 	f.StringVar(&applyOpts.tunnelConfig, "tunnel-config", "", "Path to tunnel config file (WireGuard conf, Shadowsocks json, etc.)")
@@ -75,6 +75,8 @@ func parsePersonaType(s string) netident.PersonaType {
 		return netident.PersonaiOS
 	case "linux":
 		return netident.PersonaLinux
+	case "android":
+		return netident.PersonaAndroid
 	default:
 		return netident.PersonaWindows
 	}

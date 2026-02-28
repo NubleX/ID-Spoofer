@@ -5,6 +5,39 @@ All notable changes to the ID-Spoofer project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] - 2026-02-27
+
+### Added
+
+- **Android network persona** — Projects an Android 12+ phone/tablet identity at the wire level
+  - TTL=64, ECN=0, WScale=8, mobile-tuned buffers (87380/6291456), Linux kernel TCP options order
+  - DHCP hostnames in Android style: `android-a3f9kl2d7b8e1c4f`, `samsung-...`, `pixel-...`, `oneplus-...`, `xiaomi-...`
+  - p0f signature: `*:64:0:*:65535,8:mss,sackOK,ts,nop,ws:df,id+:0`
+  - `--persona android` CLI flag; radio button in TUI Identity tab
+- **macOS native platform support** (Phase 5)
+  - MAC spoofing via `ifconfig <iface> ether <mac>` — no macchanger required
+  - TTL control via `sysctl -w net.inet.ip.ttl=<val>`
+  - DHCP hostname via `networksetup -setcomputername` + `scutil --set LocalHostName`
+  - Platform wiring: `mac_darwin.go`, `netident_darwin.go`, `platform_darwin.go`
+- **Windows native platform support** (Phase 6)
+  - MAC spoofing via registry `NetworkAddress` key under adapter class GUID + adapter bounce
+  - TTL and TCP options via `Tcpip\Parameters` registry (`DefaultTTL`, `Tcp1323Opts` bitmask)
+  - Platform wiring: `mac_windows.go`, `netident_windows.go`, `platform_windows.go`
+- **Traffic tab** — Live network traffic monitoring in the TUI (inspired by [pythops/oryx](https://github.com/pythops/oryx))
+  - Per-interface bandwidth: RX/s, TX/s, total RX, total TX with human-readable sizes
+  - Connection summary by TCP state (ESTABLISHED, TIME_WAIT, CLOSE_WAIT, etc.)
+  - Active connections table (protocol, local, remote, state) with 2-second auto-refresh
+  - Pure Go implementation: `/proc/net/dev` + `/proc/net/tcp` on Linux, `netstat -ib` on macOS, `netsh` on Windows
+  - Tab navigation: Tab 4 (Traffic), Tab 5 (Status)
+
+### Changed
+
+- TUI tabs: Dashboard | Identity | Tunnel | **Traffic** | Status (5 tabs, up from 4)
+- `platform_other.go` build tag narrowed to `!darwin && !windows` — real implementations for macOS and Windows
+- `DetectPlatform()` now calls native factory functions on Darwin and Windows instead of returning errors
+
+---
+
 ## [2.0.2] - 2026-02-27
 
 ### Added

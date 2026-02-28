@@ -46,6 +46,39 @@ type RouteInfo struct {
 	VPNRouted  bool   // default route goes through a VPN/tunnel device
 }
 
+// IfaceTraffic captures byte/packet counters for a single interface.
+type IfaceTraffic struct {
+	Name      string
+	RxBytes   uint64
+	TxBytes   uint64
+	RxPackets uint64
+	TxPackets uint64
+	RxErrors  uint64
+	TxErrors  uint64
+}
+
+// TrafficSnapshot captures per-interface counters at a point in time.
+type TrafficSnapshot struct {
+	Interfaces []IfaceTraffic
+	Timestamp  time.Time
+}
+
+// ActiveConn describes a single active TCP connection.
+type ActiveConn struct {
+	Protocol string // "tcp", "tcp6"
+	Local    string // "10.0.0.1:443"
+	Remote   string // "93.184.216.34:443"
+	State    string // "ESTABLISHED", "TIME_WAIT", etc.
+}
+
+// ReadTraffic returns the current per-interface traffic counters.
+// Implemented per-platform via build tags in traffic_*.go files.
+func ReadTraffic() (*TrafficSnapshot, error) { return readTraffic() }
+
+// ReadConnections returns the active TCP connections.
+// Implemented per-platform via build tags in traffic_*.go files.
+func ReadConnections() ([]ActiveConn, error) { return readConnections() }
+
 // NetworkState is the full snapshot of network conditions.
 type NetworkState struct {
 	Interfaces []InterfaceInfo
