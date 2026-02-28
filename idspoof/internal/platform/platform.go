@@ -24,9 +24,9 @@ func DetectPlatform() (Platform, error) {
 	case "linux":
 		return newLinuxPlatform(), nil
 	case "darwin":
-		return nil, fmt.Errorf("macOS platform not yet implemented")
+		return newDarwinPlatform()
 	case "windows":
-		return nil, fmt.Errorf("Windows platform not yet implemented")
+		return newWindowsPlatform()
 	default:
 		return nil, fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}

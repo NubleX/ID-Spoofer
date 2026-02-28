@@ -30,12 +30,17 @@ import (
 
 const nfqueueNum = 42 // Queue number for our NFQUEUE rule.
 
-// ipIDCounter is our incrementing IP ID to mimic Windows behaviour.
+// ipIDCounter is our incrementing IP ID to mimic Windows/macOS behaviour.
 var ipIDCounter atomic.Uint32
+
+// activePersona is the persona type currently being applied. Set by Apply(),
+// read by the NFQUEUE rewriter goroutine.
+var activePersona atomic.Value // stores PersonaType
 
 func init() {
 	// Seed with a non-zero value.
 	ipIDCounter.Store(0x1000)
+	activePersona.Store(PersonaWindows)
 }
 
 // nextIPID returns the next incrementing IP ID value (16-bit wrapping).
@@ -45,6 +50,7 @@ func nextIPID() uint16 {
 
 // windowsTCPOptions builds the exact TCP options bytes Windows 10/11 sends
 // on a SYN packet (no timestamps).
+// Layout: MSS, NOP, WScale, NOP, NOP, SACKPermitted
 func windowsTCPOptions(mss uint16, wscale uint8) []byte {
 	return []byte{
 		// MSS (Kind=2, Length=4, Value=mss)
@@ -57,6 +63,122 @@ func windowsTCPOptions(mss uint16, wscale uint8) []byte {
 		0x01, 0x01,
 		// SACK Permitted (Kind=4, Length=2)
 		0x04, 0x02,
+	}
+}
+
+// macosTCPOptions builds the exact TCP options bytes macOS Sonoma+ sends
+// on a SYN packet (with timestamps).
+// Layout: MSS, NOP, WScale, NOP, NOP, Timestamps, SACKPermitted, EOL+pad
+func macosTCPOptions(mss uint16, wscale uint8, tsVal, tsEcr uint32) []byte {
+	opts := []byte{
+		// MSS (Kind=2, Length=4, Value=mss)
+		0x02, 0x04, byte(mss >> 8), byte(mss),
+		// NOP (Kind=1)
+		0x01,
+		// Window Scale (Kind=3, Length=3, Value=wscale)
+		0x03, 0x03, wscale,
+		// NOP, NOP
+		0x01, 0x01,
+		// Timestamps (Kind=8, Length=10, TSval, TSecr)
+		0x08, 0x0A,
+		byte(tsVal >> 24), byte(tsVal >> 16), byte(tsVal >> 8), byte(tsVal),
+		byte(tsEcr >> 24), byte(tsEcr >> 16), byte(tsEcr >> 8), byte(tsEcr),
+		// SACK Permitted (Kind=4, Length=2)
+		0x04, 0x02,
+		// EOL (Kind=0) + pad to 4-byte boundary
+		0x00,
+	}
+	return opts
+}
+
+// extractTimestamp parses TCP options to find the Timestamps option (Kind=8)
+// and returns (TSval, TSecr, found).
+func extractTimestamp(opts []byte) (tsVal, tsEcr uint32, found bool) {
+	i := 0
+	for i < len(opts) {
+		kind := opts[i]
+		switch kind {
+		case 0: // EOL
+			return 0, 0, false
+		case 1: // NOP
+			i++
+		default:
+			if i+1 >= len(opts) {
+				return 0, 0, false
+			}
+			length := int(opts[i+1])
+			if length < 2 || i+length > len(opts) {
+				return 0, 0, false
+			}
+			if kind == 8 && length == 10 { // Timestamps
+				tsVal = binary.BigEndian.Uint32(opts[i+2 : i+6])
+				tsEcr = binary.BigEndian.Uint32(opts[i+6 : i+10])
+				return tsVal, tsEcr, true
+			}
+			i += length
+		}
+	}
+	return 0, 0, false
+}
+
+// personaWScale returns the TCP window scale factor for each persona.
+func personaWScale(p PersonaType) uint8 {
+	switch p {
+	case PersonaiOS:
+		return 16
+	case PersonaLinux:
+		return 7
+	case PersonaAndroid:
+		return 8 // Android WiFi typical — explicit for clarity
+	default: // Windows, macOS
+		return 8
+	}
+}
+
+// linuxTCPOptions builds TCP options in Linux kernel SYN order:
+// MSS, SACK Permitted, Timestamps, NOP, WScale
+// This is the order the Linux kernel emits by default — different from both
+// Windows (MSS,NOP,WS,NOP,NOP,SOK) and macOS (MSS,NOP,WS,NOP,NOP,TS,SOK).
+func linuxTCPOptions(mss uint16, wscale uint8, tsVal, tsEcr uint32) []byte {
+	return []byte{
+		// MSS (Kind=2, Length=4)
+		0x02, 0x04, byte(mss >> 8), byte(mss),
+		// SACK Permitted (Kind=4, Length=2)
+		0x04, 0x02,
+		// Timestamps (Kind=8, Length=10, TSval, TSecr)
+		0x08, 0x0A,
+		byte(tsVal >> 24), byte(tsVal >> 16), byte(tsVal >> 8), byte(tsVal),
+		byte(tsEcr >> 24), byte(tsEcr >> 16), byte(tsEcr >> 8), byte(tsEcr),
+		// NOP (Kind=1)
+		0x01,
+		// Window Scale (Kind=3, Length=3)
+		0x03, 0x03, wscale,
+	}
+}
+
+// buildTCPOptions dispatches to the correct options builder based on the
+// active persona type. origOpts is the original TCP options from the packet
+// (needed to extract timestamp values for macOS/iOS/Linux).
+func buildTCPOptions(persona PersonaType, mss uint16, wscale uint8, origOpts []byte) []byte {
+	switch persona {
+	case PersonaMacOS, PersonaiOS:
+		tsVal, tsEcr, found := extractTimestamp(origOpts)
+		if !found {
+			tsVal = 1
+			tsEcr = 0
+		}
+		return macosTCPOptions(mss, wscale, tsVal, tsEcr)
+	case PersonaLinux, PersonaAndroid:
+		// Android uses the Linux kernel — same TCP options order.
+		// Parameters differ (see AndroidPersona) but byte layout is identical.
+		tsVal, tsEcr, found := extractTimestamp(origOpts)
+		if !found {
+			tsVal = 1
+			tsEcr = 0
+		}
+		return linuxTCPOptions(mss, wscale, tsVal, tsEcr)
+	default: // PersonaWindows
+		return windowsTCPOptions(mss, wscale)
 	}
 }
 
@@ -106,8 +228,13 @@ func rewriteSYNPacket(pkt []byte) ([]byte, error) {
 		return pkt, nil
 	}
 
-	// Build new TCP options in Windows order.
-	newOpts := windowsTCPOptions(1460, 8)
+	// Extract original TCP options for timestamp preservation.
+	origOpts := pkt[tcpStart+20 : tcpStart+tcpDataOff]
+
+	// Determine the active persona and look up the correct wscale.
+	persona, _ := activePersona.Load().(PersonaType)
+	wscale := personaWScale(persona)
+	newOpts := buildTCPOptions(persona, 1460, wscale, origOpts)
 
 	// Pad to 4-byte boundary.
 	for len(newOpts)%4 != 0 {

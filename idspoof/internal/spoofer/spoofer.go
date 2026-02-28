@@ -9,35 +9,52 @@ import (
 	"github.com/NubleX/idspoof/internal/logging"
 	"github.com/NubleX/idspoof/internal/mac"
 	"github.com/NubleX/idspoof/internal/netident"
+	"github.com/NubleX/idspoof/internal/netrecon"
 	"github.com/NubleX/idspoof/internal/platform"
 	"github.com/NubleX/idspoof/internal/state"
+	"github.com/NubleX/idspoof/internal/tunnel"
 	"github.com/NubleX/idspoof/internal/ui"
 )
 
 // Orchestrator runs selected spoofing operations using the platform's spoofers.
 type Orchestrator struct {
-	plat   platform.Platform
-	state  state.Manager
-	logger *logging.Logger
+	plat    platform.Platform
+	state   state.Manager
+	logger  *logging.Logger
+	tunnelM *tunnel.Manager
 }
 
 // New creates an Orchestrator.
 func New(plat platform.Platform, st state.Manager, logger *logging.Logger) *Orchestrator {
-	return &Orchestrator{plat: plat, state: st, logger: logger}
+	return &Orchestrator{plat: plat, state: st, logger: logger, tunnelM: tunnel.NewManager()}
 }
 
 // Apply runs the spoofing operations described by opts. Returns one Result per operation.
+// Before executing, it runs a network recon probe and logs any warnings.
 func (o *Orchestrator) Apply(opts Options) []Result {
 	var results []Result
+
+	// Pre-flight: detect existing VPNs/tunnels that may conflict.
+	if warnings := o.preflight(opts); len(warnings) > 0 {
+		for _, w := range warnings {
+			o.logger.Warn("pre-flight", "warning", w)
+			if !opts.Quiet {
+				fmt.Printf("  %s %s\n", ui.Yellow("!"), w)
+			}
+		}
+	}
 
 	if opts.MAC {
 		results = append(results, o.applyMAC(opts.DryRun, opts.Quiet))
 	}
 	if opts.NetIdent {
-		results = append(results, o.applyNetIdent(opts.DryRun, opts.Quiet))
+		results = append(results, o.applyNetIdent(opts))
 	}
 	if opts.SysInfo {
 		results = append(results, o.applySysInfo(opts.DryRun, opts.Quiet))
+	}
+	if opts.Tunnel != "" && opts.Tunnel != "none" {
+		results = append(results, o.applyTunnel(opts))
 	}
 	return results
 }
@@ -52,6 +69,8 @@ func (o *Orchestrator) Restore(opts Options) []Result {
 	if opts.NetIdent {
 		results = append(results, o.restoreNetIdent(opts.Quiet))
 	}
+	// Always try to stop any active tunnel on restore.
+	results = append(results, o.restoreTunnel(opts.Quiet))
 	return results
 }
 
@@ -127,7 +146,8 @@ func (o *Orchestrator) restoreMAC(quiet bool) Result {
 
 // --- Network Identity (replaces hostname + fingerprint) ---
 
-func (o *Orchestrator) applyNetIdent(dry, quiet bool) Result {
+func (o *Orchestrator) applyNetIdent(opts Options) Result {
+	dry, quiet := opts.DryRun, opts.Quiet
 	ns := o.plat.NetIdentSpoofer()
 
 	// Snapshot current state for rollback.
@@ -148,25 +168,58 @@ func (o *Orchestrator) applyNetIdent(dry, quiet bool) Result {
 	o.state.Set("ORIG_WMEM_MAX", itoa(snap.WmemMax))
 	o.state.Set("STATE_VERSION", "2")
 
-	// Generate a Windows-style hostname for DHCP announcement (not set on the OS).
-	dhcpHostname := hostname.GenerateRandom()
-	persona := netident.WindowsPersona(dhcpHostname)
+	// Determine persona type (default to Windows).
+	pt := opts.PersonaType
+	if pt == "" {
+		pt = netident.PersonaWindows
+	}
+
+	// Generate OS-appropriate hostname for DHCP announcement.
+	var dhcpHostname string
+	var persona netident.Persona
+	switch pt {
+	case netident.PersonaMacOS:
+		dhcpHostname = hostname.GenerateRandomMacOS()
+		persona = netident.MacOSPersona(dhcpHostname)
+	case netident.PersonaiOS:
+		dhcpHostname = hostname.GenerateRandomIOS()
+		persona = netident.IOSPersona(dhcpHostname)
+	case netident.PersonaLinux:
+		dhcpHostname = hostname.GenerateRandomLinux()
+		persona = netident.LinuxPersona(dhcpHostname)
+	case netident.PersonaAndroid:
+		dhcpHostname = hostname.GenerateRandomAndroid()
+		persona = netident.AndroidPersona(dhcpHostname)
+	default:
+		dhcpHostname = hostname.GenerateRandom()
+		persona = netident.WindowsPersona(dhcpHostname)
+	}
+
+	tsStatus := "disabled"
+	if persona.TCPTimestamps == 1 {
+		tsStatus = "enabled"
+	}
 
 	if !quiet {
-		ui.Progress("Applying Windows network persona...", 20)
+		ui.Progress(fmt.Sprintf("Applying %s network persona...", pt), 20)
 		fmt.Printf("  DHCP hostname:   %s (system hostname unchanged)\n", dhcpHostname)
 		fmt.Printf("  TTL:             %d\n", persona.TTL)
-		fmt.Printf("  TCP timestamps:  disabled\n")
-		fmt.Printf("  TCP window:      65535 (wscale=8)\n")
+		fmt.Printf("  TCP timestamps:  %s\n", tsStatus)
+		fmt.Printf("  TCP window:      65535 (wscale=%d)\n", persona.WScale)
 		fmt.Printf("  MSS:             %d\n", persona.MSS)
-		fmt.Printf("  DHCP vendor:     %s\n", persona.DHCPVendorClass)
-		fmt.Printf("  NFQUEUE:         IP ID rewrite + TCP options reorder\n")
+		if persona.DHCPVendorClass != "" {
+			fmt.Printf("  DHCP vendor:     %s\n", persona.DHCPVendorClass)
+		}
+		fmt.Printf("  NFQUEUE:         IP ID rewrite + TCP options reorder (%s layout)\n", pt)
 	}
 
 	if dry {
 		return Result{Operation: OpNetIdent, Success: true,
-			Details: fmt.Sprintf("would apply Windows persona (DHCP: %s, TTL=128, MSS=1460, NFQUEUE IP ID+TCP opts)", dhcpHostname)}
+			Details: fmt.Sprintf("would apply %s persona (DHCP: %s, TTL=%d, MSS=1460, wscale=%d)", pt, dhcpHostname, persona.TTL, persona.WScale)}
 	}
+
+	// Save persona type for restore.
+	o.state.Set("PERSONA_TYPE", string(pt))
 
 	if !quiet {
 		ui.Progress("Configuring TCP/IP stack + iptables + NFQUEUE...", 50)
@@ -175,7 +228,7 @@ func (o *Orchestrator) applyNetIdent(dry, quiet bool) Result {
 	if err := ns.Apply(persona); err != nil {
 		o.logger.Warn("network persona applied with warnings", "err", err)
 		return Result{Operation: OpNetIdent, Success: true,
-			Details: fmt.Sprintf("Windows persona active (partial): %v", err)}
+			Details: fmt.Sprintf("%s persona active (partial): %v", pt, err)}
 	}
 
 	if !quiet {
@@ -183,7 +236,7 @@ func (o *Orchestrator) applyNetIdent(dry, quiet bool) Result {
 	}
 
 	return Result{Operation: OpNetIdent, Success: true,
-		Details: fmt.Sprintf("Windows persona active — DHCP hostname: %s, TTL=128, MSS=1460, timestamps=off, NFQUEUE rewriting IP ID + TCP options", dhcpHostname)}
+		Details: fmt.Sprintf("%s persona active — DHCP hostname: %s, TTL=%d, MSS=1460, timestamps=%s, wscale=%d", pt, dhcpHostname, persona.TTL, tsStatus, persona.WScale)}
 }
 
 func (o *Orchestrator) restoreNetIdent(quiet bool) Result {
@@ -238,6 +291,79 @@ func (o *Orchestrator) applySysInfo(dry, quiet bool) Result {
 		ui.Progress("System info generation complete", 100)
 	}
 	return Result{Operation: OpSysInfo, Success: true, Details: fmt.Sprintf("%s %s (serial: %s)", info.Manufacturer, info.Product, info.Serial)}
+}
+
+// --- Tunnel ---
+
+func (o *Orchestrator) applyTunnel(opts Options) Result {
+	mode := tunnel.ModeTransparent
+	if opts.TunnelMode == "socks" {
+		mode = tunnel.ModeSocks
+	}
+
+	t := tunnel.Get(opts.Tunnel)
+	if t == nil {
+		return Result{Operation: OpTunnel, Err: fmt.Errorf("unknown tunnel: %s", opts.Tunnel)}
+	}
+
+	if !t.Available() {
+		return Result{Operation: OpTunnel, Err: fmt.Errorf("%s: required binary not found (install it first)", t.Name())}
+	}
+
+	if opts.DryRun {
+		return Result{Operation: OpTunnel, Success: true,
+			Details: fmt.Sprintf("would start %s tunnel (mode=%s)", t.Name(), mode)}
+	}
+
+	if !opts.Quiet {
+		ui.Progress(fmt.Sprintf("Starting %s tunnel (%s mode)...", t.Name(), mode), 30)
+	}
+
+	cfg := map[string]string{"config": opts.TunnelCfg}
+	if err := o.tunnelM.Start(opts.Tunnel, mode, cfg); err != nil {
+		return Result{Operation: OpTunnel, Err: err}
+	}
+
+	o.state.Set("TUNNEL_PROTOCOL", opts.Tunnel)
+	o.state.Set("TUNNEL_MODE", string(mode))
+
+	if !opts.Quiet {
+		ui.Progress("Tunnel active", 100)
+	}
+
+	st := o.tunnelM.CurrentStatus()
+	return Result{Operation: OpTunnel, Success: true,
+		Details: fmt.Sprintf("%s active — %s", t.Name(), st.Endpoint)}
+}
+
+func (o *Orchestrator) restoreTunnel(quiet bool) Result {
+	st := o.tunnelM.CurrentStatus()
+	if !st.Running {
+		return Result{Operation: OpTunnel, Success: true, Details: "no active tunnel"}
+	}
+
+	if err := o.tunnelM.Stop(); err != nil {
+		return Result{Operation: OpTunnel, Err: err}
+	}
+
+	o.state.Set("TUNNEL_PROTOCOL", "")
+	o.state.Set("TUNNEL_MODE", "")
+
+	if !quiet {
+		ui.Progress("Tunnel stopped", 100)
+	}
+	return Result{Operation: OpTunnel, Success: true, Details: "tunnel stopped"}
+}
+
+// preflight runs a network probe and returns conflict warnings.
+func (o *Orchestrator) preflight(opts Options) []string {
+	prober := netrecon.NewProber()
+	ns, err := prober.Probe()
+	if err != nil {
+		o.logger.Warn("pre-flight probe failed", "err", err)
+		return nil
+	}
+	return ns.Warnings
 }
 
 // Helpers.

@@ -6,9 +6,19 @@ import (
 	"os/exec"
 )
 
+// handleMDNS manages Avahi based on the persona.
+// Windows persona: suppress Avahi (Windows 10+ has mDNS but OPSEC is better
+// with it silenced).
+// macOS/iOS persona: leave Avahi running — Apple devices use Bonjour heavily,
+// and suppressing it would be a fingerprinting tell.
+func handleMDNS(p *Persona, snap *Snapshot) {
+	if p.SuppressMDNS {
+		suppressMDNS(snap)
+	}
+	// When SuppressMDNS is false (macOS/iOS), we leave Avahi as-is.
+}
+
 // suppressMDNS stops Avahi from broadcasting the real hostname.
-// Windows 10+ does have mDNS, but for OPSEC it's better to silence
-// Avahi entirely rather than try to make it announce a fake name.
 func suppressMDNS(snap *Snapshot) {
 	// Check if avahi-daemon is running.
 	if exec.Command("systemctl", "is-active", "--quiet", "avahi-daemon").Run() != nil {

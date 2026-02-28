@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/NubleX/idspoof/internal/config"
+	"github.com/NubleX/idspoof/internal/netident"
 	"github.com/NubleX/idspoof/internal/spoofer"
 	"github.com/NubleX/idspoof/internal/ui"
 	"github.com/spf13/cobra"
@@ -11,34 +13,44 @@ import (
 
 var applyCmd = &cobra.Command{
 	Use:   "apply",
-	Short: "Apply identity spoofing (MAC, network persona, sysinfo)",
-	Long: `Apply randomises MAC addresses, projects a Windows network persona
-(TCP/IP stack, DHCP, iptables, NFQUEUE packet rewriting), and generates a
-fake system hardware profile.
+	Short: "Apply identity spoofing (MAC, network persona, sysinfo, tunnel)",
+	Long: `Apply randomises MAC addresses, projects an OS network persona
+(TCP/IP stack, DHCP, iptables, NFQUEUE packet rewriting), optionally starts
+a traffic tunnel, and generates a fake system hardware profile.
 
-The system hostname is NEVER changed — the Windows hostname is only announced
-via DHCP and NetBIOS, keeping the internal system stable.`,
+With no operation flags, all three operations run: --mac --netident --sysinfo.
+Use individual flags to run a subset (e.g. --mac --netident skips sysinfo).
+
+Supported personas: windows (default), macos, ios, linux, android.
+The system hostname is NEVER changed — the persona hostname is only announced
+via DHCP, keeping the internal system stable.`,
 	RunE: runApply,
 }
 
 var applyOpts struct {
-	macOnly      bool
-	netidentOnly bool
+	mac          bool
+	netident     bool
+	sysinfo      bool
 	dryRun       bool
+	persona      string
+	tunnel       string
+	tunnelMode   string
+	tunnelConfig string
 }
 
 func init() {
 	f := applyCmd.Flags()
-	f.BoolVar(&applyOpts.macOnly, "mac-only", false, "Only spoof MAC addresses")
-	f.BoolVar(&applyOpts.netidentOnly, "netident-only", false, "Only apply network persona (TCP/IP + DHCP + NFQUEUE)")
+	f.BoolVar(&applyOpts.mac, "mac", false, "Spoof MAC addresses")
+	f.BoolVar(&applyOpts.netident, "netident", false, "Apply network persona (TCP/IP stack, DHCP, NFQUEUE)")
+	f.BoolVar(&applyOpts.sysinfo, "sysinfo", false, "Generate fake system hardware profile")
 	f.BoolVar(&applyOpts.dryRun, "dry-run", false, "Show what would change without applying")
+	f.StringVar(&applyOpts.persona, "persona", "windows", "Network persona to project (windows, macos, ios, linux, android)")
+	f.StringVar(&applyOpts.tunnel, "tunnel", "", "Traffic encapsulation protocol (tor, wireguard, i2p, shadowsocks, quic, lwo, tor-over-vpn, vpn-over-tor)")
+	f.StringVar(&applyOpts.tunnelMode, "tunnel-mode", "transparent", "Tunnel routing mode (transparent, socks)")
+	f.StringVar(&applyOpts.tunnelConfig, "tunnel-config", "", "Path to tunnel config file (WireGuard conf, Shadowsocks json, etc.)")
 }
 
 func runApply(cmd *cobra.Command, args []string) error {
-	if applyOpts.macOnly && applyOpts.netidentOnly {
-		return fmt.Errorf("--mac-only and --netident-only are mutually exclusive")
-	}
-
 	opts := buildApplyOpts()
 
 	if !cfg.Quiet {
@@ -55,29 +67,65 @@ func runApply(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func buildApplyOpts() spoofer.Options {
-	switch {
-	case applyOpts.macOnly:
-		return spoofer.Options{MAC: true, DryRun: applyOpts.dryRun, Quiet: cfg.Quiet}
-	case applyOpts.netidentOnly:
-		return spoofer.Options{NetIdent: true, DryRun: applyOpts.dryRun, Quiet: cfg.Quiet}
+func parsePersonaType(s string) netident.PersonaType {
+	switch s {
+	case "macos":
+		return netident.PersonaMacOS
+	case "ios":
+		return netident.PersonaiOS
+	case "linux":
+		return netident.PersonaLinux
+	case "android":
+		return netident.PersonaAndroid
 	default:
-		o := spoofer.AllOps()
-		o.DryRun = applyOpts.dryRun
-		o.Quiet = cfg.Quiet
-		return o
+		return netident.PersonaWindows
+	}
+}
+
+func buildApplyOpts() spoofer.Options {
+	pt := parsePersonaType(applyOpts.persona)
+
+	// If no individual operation flag is set, default to all three.
+	anySet := applyOpts.mac || applyOpts.netident || applyOpts.sysinfo
+	mac := applyOpts.mac || !anySet
+	netident := applyOpts.netident || !anySet
+	sysinfo := applyOpts.sysinfo || !anySet
+
+	return spoofer.Options{
+		MAC:        mac,
+		NetIdent:   netident,
+		SysInfo:    sysinfo,
+		PersonaType: pt,
+		DryRun:     applyOpts.dryRun,
+		Quiet:      cfg.Quiet,
+		Tunnel:     applyOpts.tunnel,
+		TunnelMode: applyOpts.tunnelMode,
+		TunnelCfg:  applyOpts.tunnelConfig,
 	}
 }
 
 func describeOpts(opts spoofer.Options) string {
-	if opts.MAC && opts.NetIdent && opts.SysInfo {
-		return "full identity spoofing (MAC + Windows network persona + sysinfo)"
+	persona := string(opts.PersonaType)
+	if persona == "" {
+		persona = "windows"
 	}
+
+	var parts []string
 	if opts.MAC {
-		return "MAC address spoofing"
+		parts = append(parts, "MAC")
 	}
 	if opts.NetIdent {
-		return "Windows network persona (TCP/IP + DHCP + NFQUEUE)"
+		parts = append(parts, persona+" persona")
 	}
-	return "selected operations"
+	if opts.SysInfo {
+		parts = append(parts, "sysinfo")
+	}
+	if opts.Tunnel != "" {
+		parts = append(parts, opts.Tunnel+" tunnel")
+	}
+
+	if len(parts) == 0 {
+		return "no operations selected"
+	}
+	return strings.Join(parts, " + ")
 }
