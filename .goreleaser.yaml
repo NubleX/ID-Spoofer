@@ -42,7 +42,7 @@ checksum:
 release:
   github:
     owner: NubleX
-    name: idspoof
+    name: ID-Spoofer
   draft: false
   prerelease: auto
   footer: |
