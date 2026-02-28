@@ -222,6 +222,11 @@ func (m trafficModel) Update(msg tea.Msg) (trafficModel, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
+		// Only keep the spinner running while actively scanning.
+		// Returning nil stops the tick loop; trafficTick restarts it.
+		if !m.scanning {
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
@@ -277,11 +282,17 @@ func (m trafficModel) renderBandwidth(width int) string {
 	b.WriteString(sPanelTitle.Render("  INTERFACE BANDWIDTH") + "\n")
 	b.WriteString(sSeparator.Render("  "+strings.Repeat("─", min(width-4, 76))) + "\n")
 
-	hasAny := false
+	// Sort interfaces alphabetically for a stable render order.
+	ifaces := make([]netrecon.IfaceTraffic, 0, len(m.curr.Interfaces))
 	for _, it := range m.curr.Interfaces {
-		if it.Name == "lo" {
-			continue
+		if it.Name != "lo" {
+			ifaces = append(ifaces, it)
 		}
+	}
+	sort.Slice(ifaces, func(i, j int) bool { return ifaces[i].Name < ifaces[j].Name })
+
+	hasAny := false
+	for _, it := range ifaces {
 		hasAny = true
 		h := m.history[it.Name]
 

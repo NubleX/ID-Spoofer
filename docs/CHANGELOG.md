@@ -5,6 +5,32 @@ All notable changes to the ID-Spoofer project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5] - 2026-02-28
+
+### Added
+
+- Go module badge on README for `pkg.go.dev` registration
+- `CHANGELOG.md` linked from goreleaser release notes
+
+### Fixed
+
+- **TUI interface flickering** on Dashboard and Traffic tabs — spinner tick messages were broadcast to all tabs at ~10Hz causing rapid re-renders; now routed only to the active tab
+- Interface display order sorted alphabetically for stable rendering across refreshes
+
+### Changed
+
+- Go module path updated to `github.com/NubleX/ID-Spoofer/idspoof` for proper `pkg.go.dev` registration
+- CI Go version bumped from 1.22 to 1.24 to match `go.mod`
+- Installation URLs in README fixed to match actual repo name (`ID-Spoofer`)
+- Phase 7 (GitHub Actions CI + goreleaser) marked complete in roadmap
+
+### Infrastructure
+
+- Dual tag scheme: `v2.0.5` (goreleaser) + `idspoof/v2.0.5` (Go module subdirectory convention)
+- goreleaser builds Linux (amd64/arm64), macOS (amd64/arm64), and Windows (amd64) binaries
+
+---
+
 ## [2.0.4] - 2026-02-27
 
 ### Added
@@ -225,4 +251,4 @@ N/A - Initial release
 
 ---
 
-**For support, bug reports, or feature requests, please visit our [GitHub repository](https://github.com/nublex/id-spoofer).**
+**For support, bug reports, or feature requests, please visit our [GitHub repository](https://github.com/NubleX/ID-Spoofer).**

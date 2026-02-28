@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,6 +65,9 @@ func (m dashboardModel) Update(msg tea.Msg) (dashboardModel, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, probeNetwork)
 
 	case spinner.TickMsg:
+		if !m.scanning {
+			return m, nil
+		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
@@ -137,7 +141,11 @@ func (m dashboardModel) renderInterfaces(ns *netrecon.NetworkState, width int) s
 		sTableHeader.Render("TYPE"))
 	b.WriteString(hdr + "\n")
 
-	for _, iface := range ns.Interfaces {
+	ifaces := make([]netrecon.InterfaceInfo, len(ns.Interfaces))
+	copy(ifaces, ns.Interfaces)
+	sort.Slice(ifaces, func(i, j int) bool { return ifaces[i].Name < ifaces[j].Name })
+
+	for _, iface := range ifaces {
 		state := sDown.Render("\u25cb DOWN")
 		if iface.State == "UP" {
 			state = sUp.Render("\u25cf UP  ")

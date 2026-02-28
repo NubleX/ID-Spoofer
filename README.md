@@ -1,13 +1,14 @@
 <div align="center">
   <img src="assets/images/logo.png" alt="ID-Spoofer Logo" width="400"/>
 
-# ID-Spoofer v2.0.4
+# ID-Spoofer v2.0.5
 
 ![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
-![Version](https://img.shields.io/badge/version-2.0.4-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.5-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
 ![Language](https://img.shields.io/badge/language-Go-00ADD8.svg)
 ![Status](https://img.shields.io/badge/status-active-brightgreen.svg)
+[![Go Reference](https://pkg.go.dev/badge/github.com/NubleX/ID-Spoofer/idspoof.svg)](https://pkg.go.dev/github.com/NubleX/ID-Spoofer/idspoof)
 
 </div>
 
@@ -25,7 +26,7 @@ A cross-platform identity spoofing toolkit for penetration testing and security 
 
 <div align="center">
 
-**New Dashboard 2.0.3**
+**New Dashboard 2.0.5**
 <img src="assets/images/screenshot0_dashboard.png" alt="New dashboard showing active connections for ease of management" width="800"/>
 
 ---
@@ -130,7 +131,7 @@ Tunnels run in two modes:
 
 ```bash
 # Download the latest release for your platform
-curl -sL https://github.com/NubleX/id-spoofer/releases/latest/download/idspoof_linux_amd64 -o idspoof
+curl -sL https://github.com/NubleX/ID-Spoofer/releases/latest/download/idspoof_linux_amd64 -o idspoof
 chmod +x idspoof
 sudo mv idspoof /usr/local/bin/
 ```
@@ -138,7 +139,7 @@ sudo mv idspoof /usr/local/bin/
 ### Build from source
 
 ```bash
-git clone https://github.com/NubleX/id-spoofer.git
+git clone https://github.com/NubleX/ID-Spoofer.git
 cd id-spoofer/idspoof
 make build
 sudo cp bin/idspoof /usr/local/bin/
@@ -263,7 +264,7 @@ The original Bash toolkit is preserved in `legacy/` and in the `master` branch h
 - [x] Phase 4: Multi-OS personas (Windows, macOS, iOS, Android) + protocol encapsulation (8 tunnel protocols)
 - [x] Phase 5: macOS native (ifconfig, scutil, sysctl net.inet.ip.ttl)
 - [x] Phase 6: Windows native (registry MAC, WMI hostname, Tcpip\Parameters)
-- [ ] Phase 7: GitHub Actions CI + goreleaser multi-platform releases
+- [x] Phase 7: GitHub Actions CI + goreleaser multi-platform releases
 
 ## Acknowledgements
 
