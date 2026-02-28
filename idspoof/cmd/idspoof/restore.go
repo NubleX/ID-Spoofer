@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/NubleX/idspoof/internal/spoofer"
-	"github.com/NubleX/idspoof/internal/ui"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/spoofer"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/ui"
 	"github.com/spf13/cobra"
 )
 

@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/NubleX/idspoof/internal/hostname"
-	"github.com/NubleX/idspoof/internal/logging"
-	"github.com/NubleX/idspoof/internal/mac"
-	"github.com/NubleX/idspoof/internal/netident"
-	"github.com/NubleX/idspoof/internal/netrecon"
-	"github.com/NubleX/idspoof/internal/platform"
-	"github.com/NubleX/idspoof/internal/state"
-	"github.com/NubleX/idspoof/internal/tunnel"
-	"github.com/NubleX/idspoof/internal/ui"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/hostname"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/logging"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/mac"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/netident"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/netrecon"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/platform"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/state"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/tunnel"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/ui"
 )
 
 // Orchestrator runs selected spoofing operations using the platform's spoofers.

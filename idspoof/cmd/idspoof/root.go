@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/NubleX/idspoof/internal/config"
-	"github.com/NubleX/idspoof/internal/logging"
-	"github.com/NubleX/idspoof/internal/platform"
-	"github.com/NubleX/idspoof/internal/state"
-	"github.com/NubleX/idspoof/internal/spoofer"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/config"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/logging"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/platform"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/state"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/spoofer"
 	"github.com/spf13/cobra"
 )
 

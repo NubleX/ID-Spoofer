@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/NubleX/idspoof/internal/netrecon"
-	"github.com/NubleX/idspoof/internal/ui"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/netrecon"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/ui"
 	"github.com/spf13/cobra"
 )
 

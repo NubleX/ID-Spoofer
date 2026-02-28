@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/NubleX/idspoof/internal/netrecon"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/netrecon"
 )
 
 // Messages for async probe.

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/NubleX/idspoof/internal/config"
-	"github.com/NubleX/idspoof/internal/netident"
-	"github.com/NubleX/idspoof/internal/spoofer"
-	"github.com/NubleX/idspoof/internal/ui"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/config"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/netident"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/spoofer"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/ui"
 	"github.com/spf13/cobra"
 )
 

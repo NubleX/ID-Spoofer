@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/NubleX/idspoof/internal/ui"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/ui"
 	"github.com/spf13/cobra"
 )
 
