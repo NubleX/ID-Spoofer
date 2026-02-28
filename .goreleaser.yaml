@@ -4,8 +4,7 @@ project_name: idspoof
 
 before:
   hooks:
-    - cmd: go mod tidy
-      dir: idspoof
+    - sh -c "cd idspoof && go mod tidy"
 
 builds:
   - id: idspoof
