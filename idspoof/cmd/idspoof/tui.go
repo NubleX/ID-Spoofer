@@ -81,15 +81,15 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % tab(len(tabNames))
 			m.lastMsg = ""
-			return m, nil
+			return m, m.restartSpinnerIfNeeded()
 		case "shift+tab":
 			m.activeTab = (m.activeTab - 1 + tab(len(tabNames))) % tab(len(tabNames))
 			m.lastMsg = ""
-			return m, nil
+			return m, m.restartSpinnerIfNeeded()
 		case "1":
 			m.activeTab = tabDashboard
 			m.lastMsg = ""
-			return m, nil
+			return m, m.restartSpinnerIfNeeded()
 		case "2":
 			m.activeTab = tabIdentity
 			m.lastMsg = ""
@@ -101,7 +101,7 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "4":
 			m.activeTab = tabTraffic
 			m.lastMsg = ""
-			return m, nil
+			return m, m.restartSpinnerIfNeeded()
 		case "5":
 			m.activeTab = tabStatus
 			m.lastMsg = ""
@@ -131,16 +131,22 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.dashboard.spinner.Tick, probeNetwork)
 		}
 
-	// Route spinner ticks to both dashboard and traffic (they each have a spinner).
+	// Route spinner ticks only to the active tab to avoid ~10Hz re-renders
+	// of invisible tabs (which caused interface row flickering).
 	case spinner.TickMsg:
-		var cmd1, cmd2 tea.Cmd
-		m.dashboard, cmd1 = m.dashboard.Update(msg)
-		m.traffic, cmd2 = m.traffic.Update(msg)
-		if cmd1 != nil {
-			cmds = append(cmds, cmd1)
-		}
-		if cmd2 != nil {
-			cmds = append(cmds, cmd2)
+		switch m.activeTab {
+		case tabDashboard:
+			var cmd tea.Cmd
+			m.dashboard, cmd = m.dashboard.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		case tabTraffic:
+			var cmd tea.Cmd
+			m.traffic, cmd = m.traffic.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		return m, tea.Batch(cmds...)
 
@@ -252,6 +258,23 @@ func (m mainModel) View() string {
 	b.WriteString("\n")
 
 	return b.String()
+}
+
+// restartSpinnerIfNeeded re-kicks the spinner tick loop when switching to a
+// tab that has an active scanning state. Without this, the spinner would stay
+// frozen because tick messages were only routed to the previously active tab.
+func (m mainModel) restartSpinnerIfNeeded() tea.Cmd {
+	switch m.activeTab {
+	case tabDashboard:
+		if m.dashboard.scanning {
+			return m.dashboard.spinner.Tick
+		}
+	case tabTraffic:
+		if m.traffic.scanning {
+			return m.traffic.spinner.Tick
+		}
+	}
+	return nil
 }
 
 // ── Rendering helpers ───────────────────────────────────────────────────────
