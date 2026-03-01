@@ -10,6 +10,8 @@ Thumbs.db
 
 # Go build output
 idspoof/bin/
+idspoof/idspoof
+idspoof/idspoof.exe
 
 # State and logs (runtime, not repo)
 /var/log/idspoof/
