@@ -25,8 +25,9 @@ var rootCmd = &cobra.Command{
 	Long: `ID-Spoofer randomises MAC addresses, hostname, TCP/IP fingerprint,
 and system hardware profile to support penetration testing and security assessments.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Skip privilege check for version/help.
-		if cmd.Name() == "version" || cmd.Name() == "help" {
+		// Skip privilege/state setup for version, help, and the rewriter
+		// helper (it runs detached right after spawn and needs only root).
+		if cmd.Name() == "version" || cmd.Name() == "help" || cmd.Name() == "__rewriter" {
 			return nil
 		}
 		if err := platform.EnsurePrivileged(); err != nil {
@@ -67,10 +68,12 @@ func init() {
 
 	rootCmd.AddCommand(applyCmd)
 	rootCmd.AddCommand(restoreCmd)
+	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(menuCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(rewriterCmd)
 }
 
 // printResults prints the result table to stdout.

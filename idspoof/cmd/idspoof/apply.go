@@ -52,7 +52,6 @@ func init() {
 
 func runApply(cmd *cobra.Command, args []string) error {
 	opts := buildApplyOpts()
-
 	if !cfg.Quiet {
 		ui.PrintBanner(config.Version)
 		desc := describeOpts(opts)
@@ -85,23 +84,29 @@ func parsePersonaType(s string) netident.PersonaType {
 func buildApplyOpts() spoofer.Options {
 	pt := parsePersonaType(applyOpts.persona)
 
-	// If no individual operation flag is set, default to all three.
-	anySet := applyOpts.mac || applyOpts.netident || applyOpts.sysinfo
-	mac := applyOpts.mac || !anySet
-	netident := applyOpts.netident || !anySet
-	sysinfo := applyOpts.sysinfo || !anySet
+	mac, netident, sysinfo := selectOps(applyOpts.mac, applyOpts.netident, applyOpts.sysinfo)
 
 	return spoofer.Options{
-		MAC:        mac,
-		NetIdent:   netident,
-		SysInfo:    sysinfo,
+		MAC:         mac,
+		NetIdent:    netident,
+		SysInfo:     sysinfo,
 		PersonaType: pt,
-		DryRun:     applyOpts.dryRun,
-		Quiet:      cfg.Quiet,
-		Tunnel:     applyOpts.tunnel,
-		TunnelMode: applyOpts.tunnelMode,
-		TunnelCfg:  applyOpts.tunnelConfig,
+		DryRun:      applyOpts.dryRun,
+		Quiet:       cfg.Quiet,
+		Tunnel:      applyOpts.tunnel,
+		TunnelMode:  applyOpts.tunnelMode,
+		TunnelCfg:   applyOpts.tunnelConfig,
 	}
+}
+
+// selectOps implements the shared operation-flag convention of apply
+// and serve: with no operation flags, all three operations run;
+// passing any restricts the set to those selected.
+func selectOps(mac, netident, sysinfo bool) (bool, bool, bool) {
+	if !mac && !netident && !sysinfo {
+		return true, true, true
+	}
+	return mac, netident, sysinfo
 }
 
 func describeOpts(opts spoofer.Options) string {
@@ -115,7 +120,8 @@ func describeOpts(opts spoofer.Options) string {
 		parts = append(parts, "MAC")
 	}
 	if opts.NetIdent {
-		parts = append(parts, persona+" persona")
+		part := persona + " persona"
+		parts = append(parts, part)
 	}
 	if opts.SysInfo {
 		parts = append(parts, "sysinfo")

@@ -77,8 +77,8 @@ func (f *FileState) All() (map[string]string, error) {
 	return f.readAll()
 }
 
-// StateDir returns the directory where state files are stored.
-func (f *FileState) StateDir() string { return f.stateDir }
+// Dir returns the directory where state files are stored.
+func (f *FileState) Dir() string { return f.stateDir }
 
 // readAll parses the state file. Returns empty map if file does not exist.
 func (f *FileState) readAll() (map[string]string, error) {

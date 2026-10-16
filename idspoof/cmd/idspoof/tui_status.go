@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/netident"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -124,9 +125,14 @@ func (m statusModel) View(width int) string {
 	}
 
 	// ── NFQUEUE ──
-	if strings.Contains(iptOut, "NFQUEUE") {
-		b.WriteString(sOK.Render("  NFQUEUE rewriter active (queue 42)") + "\n")
-	} else {
+	pid, persona, alive := netident.RewriterStatus(stateM.Dir())
+	switch {
+	case alive:
+		b.WriteString(sOK.Render(fmt.Sprintf("  Rewriter active — PID %d, persona %s (queue 42)", pid, persona)) + "\n")
+	case strings.Contains(iptOut, "NFQUEUE"):
+		b.WriteString(sWarn.Render("  STALE — rule present, no live rewriter: new TCP connections time out") + "\n")
+		b.WriteString(sTableDim.Render("  fix: idspoof apply --netident  |  idspoof restore --netident") + "\n")
+	default:
 		b.WriteString(sTableDim.Render("  NFQUEUE not active") + "\n")
 	}
 

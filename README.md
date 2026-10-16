@@ -195,6 +195,14 @@ sudo idspoof restore --mac
 # Roll back only network persona
 sudo idspoof restore --netident
 
+# Foreground managed mode: apply the persona, keep it alive while you
+# test, and roll everything back on stop (SIGTERM/SIGINT) — intended
+# for systemd units or a supervised session
+sudo idspoof serve --persona macos --netident
+
+# Scope the mangle chain to one user's traffic (Linux)
+sudo idspoof serve --persona macos --netident --owner obscura
+
 # Interactive TUI menu
 sudo idspoof menu
 
@@ -235,14 +243,14 @@ sudo tcpdump -i any -nn 'tcp[tcpflags] & tcp-syn != 0' -X
 
 ## State management
 
-State is stored in `/var/log/idspoof/state.env` — an atomic key=value file backward-compatible with the v1 Bash format. Keys include `ORIG_MACS`, `ORIG_TTL`, `ORIG_TCP_TIMESTAMPS`, and related sysctl originals. `restore` uses these to fully roll back.
+State is stored in `/var/log/idspoof/state.env` — an atomic key=value file backward-compatible with the v1 Bash format. Keys include `ORIG_MACS`, `ORIG_TTL`, `ORIG_TCP_TIMESTAMPS`, and related sysctl originals. `restore` uses these to fully roll back. The sysctl baseline (`ORIG_TTL` & co.) is captured on the **first** apply only — re-applying without a restore in between keeps the saved baseline instead of recording the persona's own values as the "originals" — and is cleared again on a successful `restore`, so each apply cycle starts from a fresh capture. The NFQUEUE rewriter additionally writes `rewriter.pid` (live PID + persona) and `rewriter.log` (helper output/kernel errors, fresh per daemon) into the same directory. In `serve` mode the rewriter runs in the foreground process instead of the detached helper: `rewriter.pid` is still written (marker `serve`) and the engine stops on SIGTERM/SIGINT, but no `rewriter.log` is produced. `idspoof status` reports the rewriter's real liveness (PID + process check); if the iptables rule is present but no process is draining queue 42, `status` flags it as STALE — that is the "new TCP connections time out" state, and `apply --netident` or `restore --netident` clears it.
 
 ## Architecture
 
 The Go rewrite (`idspoof/`) replaces the original Bash scripts with a structured, cross-platform binary:
 
 ```
-cmd/idspoof/          CLI commands (cobra): apply, restore, status, menu, version
+cmd/idspoof/          CLI commands (cobra): apply, serve, restore, status, menu, version
 internal/
   mac/                MAC generation and Linux interface manipulation
   netident/           Multi-OS network persona: sysctl, iptables, NFQUEUE, DHCP, mDNS

@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/netident"
 	"github.com/NubleX/ID-Spoofer/idspoof/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -26,11 +27,16 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	ifaces := currentMACMap()
 	origMACs, _ := stateM.Get("ORIG_MACS")
 	origMap := parseMACState(origMACs)
+	spoofedMACs, _ := stateM.Get("SPOOFED_MACS")
+	spoofedMap := parseMACState(spoofedMACs)
 
 	for name, mac := range ifaces {
 		orig := origMap[name]
 		changed := ""
-		if orig != "" && !strings.EqualFold(orig, mac) {
+		// A live MAC is marked only when it equals a value we recorded
+		// as spoofed: a stale ORIG_MACS baseline (rotated bridges, a
+		// re-randomized docker) must not read as active spoofing.
+		if sp := spoofedMap[name]; sp != "" && strings.EqualFold(sp, mac) {
 			changed = ui.Yellow("  [spoofed]")
 		}
 		fmt.Printf("  %-12s  current: %-20s  original: %s%s\n", name, mac, orig, changed)
@@ -47,19 +53,25 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	origTTL, _ := stateM.Get("ORIG_TTL")
 	origTS, _ := stateM.Get("ORIG_TCP_TIMESTAMPS")
 
-	printFPRow("TTL", ttl, origTTL, "128=Windows, 64=Linux")
-	printFPRow("tcp_timestamps", ts, origTS, "0=Windows, 1=Linux")
+	// The MacOS legend entry comes from the persona definition, so it
+	// stays in sync with what apply actually writes.
+	fpMac := netident.PersonaForType(netident.PersonaMacOS)
+	printFPRow("TTL", ttl, origTTL, fmt.Sprintf("128=Windows, 64=Linux, %d=MacOS", fpMac.TTL))
+	printFPRow("tcp_timestamps", ts, origTS, fmt.Sprintf("0=Windows, 1=Linux, %d=MacOS", fpMac.TCPTimestamps))
 	printFPRow("tcp_window_scaling", ws, "", "")
 	printFPRow("tcp_sack", sack, "", "")
 	printFPRow("tcp_ecn", ecn, "", "")
 
-	// iptables rules.
+	// iptables rules (current chain, with legacy fallback).
 	fmt.Println(ui.Bold("\niptables mangle rules:"))
-	iptOut := runCmd("iptables", "-t", "mangle", "-S", "IDSPOOF_WINEMU")
-	if strings.Contains(iptOut, "IDSPOOF_WINEMU") {
-		fmt.Println(ui.Green("  IDSPOOF_WINEMU chain active"))
+	iptOut := runCmd("iptables", "-t", "mangle", "-S", "IDSPOOF_NETEMU")
+	if !strings.Contains(iptOut, "IDSPOOF_NETEMU") {
+		iptOut = runCmd("iptables", "-t", "mangle", "-S", "IDSPOOF_WINEMU") // legacy v2.0.0 chain
+	}
+	if strings.Contains(iptOut, "IDSPOOF") {
+		fmt.Println(ui.Green("  ID-Spoofer mangle chain active"))
 		for _, line := range strings.Split(iptOut, "\n") {
-			if line != "" {
+			if line != "" && line != "N/A" {
 				fmt.Printf("    %s\n", line)
 			}
 		}
@@ -67,11 +79,22 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		fmt.Println("  No ID-Spoofer iptables rules active")
 	}
 
-	// NFQUEUE status.
+	// NFQUEUE status — real liveness: pid file + process check. Rule
+	// presence alone is NOT enough: with no live dequeuer the kernel
+	// drops queued SYNs and new TCP connections time out.
 	fmt.Println(ui.Bold("\nNFQUEUE packet rewriter:"))
-	if strings.Contains(iptOut, "NFQUEUE") {
-		fmt.Println(ui.Green("  Active — rewriting IP ID + TCP options on SYN packets"))
-	} else {
+	pid, persona, alive := netident.RewriterStatus(stateM.Dir())
+	ruleActive := strings.Contains(iptOut, "NFQUEUE")
+	switch {
+	case alive:
+		fmt.Printf("  %s\n", ui.Green(fmt.Sprintf(
+			"Active — PID %d (persona: %s), rewriting IP ID + TCP options on SYN packets",
+			pid, persona)))
+	case ruleActive:
+		fmt.Println(ui.Yellow("  STALE — iptables rule present but no live rewriter process"))
+		fmt.Println("  New TCP connections will time out. Fix: systemctl restart the idspoof service, or: idspoof apply --netident (restart rewriter)")
+		fmt.Println("  or: idspoof restore --netident  (drop the persona)")
+	default:
 		fmt.Println("  Not active")
 	}
 

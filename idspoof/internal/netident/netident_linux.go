@@ -8,11 +8,21 @@ import (
 )
 
 type linuxSpoofer struct {
-	rewriter *NFQueueRewriter
+	stateDir string
+	noDaemon bool // don't start the rewriter daemon; leave the queue to an external process
 }
 
 // NewLinuxSpoofer returns the Linux network persona spoofer.
 func NewLinuxSpoofer() Spoofer { return &linuxSpoofer{} }
+
+// SetStateDir implements StateDirAware: the NFQUEUE rewriter daemon is
+// tracked via a pid file in the state directory.
+func (s *linuxSpoofer) SetStateDir(dir string) { s.stateDir = dir }
+
+// SetNoDaemon implements RewriterSpawnControl: keep the NFQUEUE rule but
+// leave the queue to an external process (e.g. a service manager) instead of
+// starting the detached helper.
+func (s *linuxSpoofer) SetNoDaemon(v bool) { s.noDaemon = v }
 
 // Current snapshots the active system state so we can restore later.
 func (s *linuxSpoofer) Current() (*Snapshot, error) {
@@ -52,17 +62,34 @@ func (s *linuxSpoofer) Apply(p Persona) error {
 	}
 
 	// 3. NFQUEUE packet rewriter — IP ID + TCP options ordering.
-	//    Rewrites SYN packets to match the target OS:
-	//      - IP ID: 0 → incrementing (both Windows and macOS)
-	//      - TCP options: reordered to target OS layout
+	//    The kernel rule diverts outgoing SYNs to queue 42; a detached
+	//    helper process (`idspoof __rewriter`, pid tracked in the state
+	//    dir) dequeues and rewrites them, so the persona survives this
+	//    CLI process exiting.
 	if err := installNFQueueRule(); err != nil {
 		errs = append(errs, fmt.Sprintf("nfqueue rule: %v", err))
-	} else {
-		s.rewriter = NewNFQueueRewriter(nfqueueNum)
-		if err := s.rewriter.Start(); err != nil {
-			errs = append(errs, fmt.Sprintf("nfqueue rewriter: %v", err))
+	} else if s.noDaemon {
+		// The queue is expected to be drained by an external process
+		// (e.g. a service manager running `idspoof __rewriter`); check
+		// what, if anything, currently owns it.
+		pid, runningPersona, alive := RewriterStatus(s.stateDir)
+		switch {
+		case alive && PersonaType(runningPersona) == p.Type:
+			// An external rewriter for the matching persona already
+			// drains the queue — nothing to do.
+		case alive:
+			errs = append(errs, fmt.Sprintf(
+				"nfqueue rewriter: running rewriter (PID %d) uses persona %s, not %s; stop it (or its service) before applying with an external rewriter",
+				pid, runningPersona, p.Type))
 			removeNFQueueRule()
+		default:
+			errs = append(errs, fmt.Sprintf(
+				"nfqueue rewriter: not running; expected under an external manager, which starts its own rewriter (manual equivalent: `idspoof __rewriter --persona %s`)",
+				p.Type))
 		}
+	} else if _, err := SpawnRewriterDaemon(s.stateDir, p.Type); err != nil {
+		errs = append(errs, fmt.Sprintf("nfqueue rewriter: %v", err))
+		removeNFQueueRule()
 	}
 
 	// 4. DHCP — announce persona hostname + optional vendor class.
@@ -84,10 +111,10 @@ func (s *linuxSpoofer) Apply(p Persona) error {
 func (s *linuxSpoofer) Restore(snap *Snapshot) error {
 	var errs []string
 
-	// Stop NFQUEUE rewriter first.
-	if s.rewriter != nil {
-		s.rewriter.Stop()
-		s.rewriter = nil
+	// Stop the rewriter daemon first, so the queue is cleanly unbound
+	// before the iptables rules are removed.
+	if _, err := StopRewriterDaemon(s.stateDir); err != nil {
+		errs = append(errs, fmt.Sprintf("rewriter stop: %v", err))
 	}
 
 	if sysctlErrs := restoreSysctl(snap); len(sysctlErrs) > 0 {

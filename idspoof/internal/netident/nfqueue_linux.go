@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
 	"sync"
 	"syscall"
 	"time"
@@ -35,11 +36,12 @@ const (
 	nfqnlCfgCmdUnbind = 2
 	nfqnlCopyPacket   = 2
 
-	// Attribute types from nfqnl_attr_type.
-	nfqaPacketHdr     = 1
-	nfqaPayload       = 10
-	nfqaCfgCmd        = 1
-	nfqaCfgParams     = 2
+	// Attribute types from nfqnl_attr_type (kernel UAPI).
+	nfqaPacketHdr  = 1  // NFQA_PACKET_HDR
+	nfqaVerdictHdr = 2  // NFQA_VERDICT_HDR
+	nfqaPayload    = 10 // NFQA_PAYLOAD
+	nfqaCfgCmd     = 1  // NFQA_CFG_CMD (config messages)
+	nfqaCfgParams  = 2  // NFQA_CFG_PARAMS
 
 	// Verdicts.
 	nfAccept = 1
@@ -78,7 +80,11 @@ func (r *NFQueueRewriter) Start() error {
 	}
 	r.fd = fd
 
-	sa := &syscall.SockaddrNetlink{Family: syscall.AF_NETLINK}
+	// Bind the netlink port and join the queue's multicast group.
+	// The kernel unicasts NFQUEUE packet messages to the socket that
+	// bound the queue; the group join is harmless insurance for
+	// kernels that multicast instead.
+	sa := &syscall.SockaddrNetlink{Family: syscall.AF_NETLINK, Groups: 1 << nfnlSubsysQueue}
 	if err := syscall.Bind(fd, sa); err != nil {
 		syscall.Close(fd)
 		return fmt.Errorf("binding netlink socket: %w", err)
@@ -155,6 +161,21 @@ func (r *NFQueueRewriter) loop(ctx context.Context) {
 		if n < 16 {
 			continue
 		}
+		// Kernel error replies (e.g. a rejected verdict) arrive as
+		// NLMSG_ERROR; log them so rewriter.log is diagnosable.
+		if n >= 20 && binary.LittleEndian.Uint16(buf[4:6]) == 2 {
+			if errno := int32(binary.LittleEndian.Uint32(buf[16:20])); errno != 0 {
+				detail := ""
+				if n >= 26 {
+					// NLMSG_ERROR embeds the offending request; its
+					// nlmsghdr.type tells us which of our messages failed.
+					detail = fmt.Sprintf(" (rejecting msgtype %d)",
+						binary.LittleEndian.Uint16(buf[24:26]))
+				}
+				fmt.Fprintf(os.Stderr, "nfqueue: kernel error %d%s\n", -errno, detail)
+			}
+			continue
+		}
 
 		r.handleMessage(buf[:n])
 	}
@@ -221,13 +242,15 @@ func (r *NFQueueRewriter) handleMessage(data []byte) {
 
 func (r *NFQueueRewriter) sendVerdict(packetID uint32, verdict int, pkt []byte) {
 	// Build verdict message.
-	// Verdict header: packet ID (4 bytes) + verdict (4 bytes).
+	// NFQA_VERDICT_HDR is struct nfqnl_msg_verdict_hdr:
+	//   verdict (4, big-endian) + id (4, big-endian). The modified
+	// packet travels in a separate NFQA_PAYLOAD attribute.
 	verdictHdr := make([]byte, 8)
-	binary.BigEndian.PutUint32(verdictHdr[0:4], packetID)
-	binary.BigEndian.PutUint32(verdictHdr[4:8], uint32(verdict))
+	binary.BigEndian.PutUint32(verdictHdr[0:4], uint32(verdict))
+	binary.BigEndian.PutUint32(verdictHdr[4:8], packetID)
 
 	// NLA: verdict header attr.
-	verdictAttr := nlattr(1, verdictHdr) // NFQA_VERDICT_HDR = 1
+	verdictAttr := nlattr(nfqaVerdictHdr, verdictHdr)
 
 	// NLA: modified payload if any.
 	var payloadAttr []byte
@@ -242,11 +265,14 @@ func (r *NFQueueRewriter) sendVerdict(packetID uint32, verdict int, pkt []byte) 
 }
 
 func (r *NFQueueRewriter) sendConfig(cmd uint8) error {
-	// Config command attribute: cmd (1 byte) + padding (1 byte) + pf (2 bytes).
+	// NFQA_CFG_CMD is struct nfqnl_msg_config_cmd:
+	//   command (1) + pad (1) + pf (2, big-endian). The queue number is
+	// NOT carried here — the kernel takes it from nfgenmsg.res_id,
+	// which sendNL sets.
 	cmdData := make([]byte, 4)
 	cmdData[0] = cmd
 	cmdData[1] = 0
-	binary.BigEndian.PutUint16(cmdData[2:4], syscall.AF_INET)
+	binary.BigEndian.PutUint16(cmdData[2:4], uint16(syscall.AF_INET))
 
 	attr := nlattr(nfqaCfgCmd, cmdData)
 	msgType := uint16(nfnlMsgType + nfqnlMsgConfig)
@@ -254,8 +280,9 @@ func (r *NFQueueRewriter) sendConfig(cmd uint8) error {
 }
 
 func (r *NFQueueRewriter) setCopyMode(mode uint8, size uint32) error {
-	// Params: copy_range (4 bytes) + copy_mode (1 byte) + padding (3 bytes).
-	params := make([]byte, 8)
+	// NFQA_CFG_PARAMS is struct nfqnl_msg_config_params (packed):
+	//   copy_range (4, big-endian) + copy_mode (1).
+	params := make([]byte, 5)
 	binary.BigEndian.PutUint32(params[0:4], size)
 	params[4] = mode
 

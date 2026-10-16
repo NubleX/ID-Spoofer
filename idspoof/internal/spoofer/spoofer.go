@@ -88,10 +88,14 @@ func (o *Orchestrator) applyMAC(dry, quiet bool) Result {
 		ui.Progress("Discovering network interfaces...", 10)
 	}
 
-	// Save originals to state before changing.
-	origState := mac.InterfacesToStateString(ifaces)
-	if err := o.state.Set("ORIG_MACS", origState); err != nil {
-		o.logger.Warn("could not persist original MACs", "err", err)
+	// Save originals to state before changing — but only on the first
+	// apply. Re-baselining after a rotation would record the rotated
+	// live values as originals and make every later restore a no-op.
+	if _, exists := o.state.Get("ORIG_MACS"); !exists {
+		origState := mac.InterfacesToStateString(ifaces)
+		if err := o.state.Set("ORIG_MACS", origState); err != nil {
+			o.logger.Warn("could not persist original MACs", "err", err)
+		}
 	}
 
 	if dry {
@@ -110,6 +114,14 @@ func (o *Orchestrator) applyMAC(dry, quiet bool) Result {
 	if err != nil {
 		o.logger.Error("MAC spoofing failed", "err", err)
 		return Result{Operation: OpMAC, Err: err}
+	}
+
+	// Record the interfaces that now carry spoofed MACs so status can
+	// mark a live MAC as spoofed only when it matches a value we set.
+	if len(changed) > 0 {
+		if err := o.state.Set("SPOOFED_MACS", mac.InterfacesToStateString(changed)); err != nil {
+			o.logger.Warn("could not persist spoofed MACs", "err", err)
+		}
 	}
 
 	if !quiet {
@@ -138,6 +150,7 @@ func (o *Orchestrator) restoreMAC(quiet bool) Result {
 	if err := ms.Restore(ifaces); err != nil {
 		return Result{Operation: OpMAC, Err: err}
 	}
+	o.state.Delete("SPOOFED_MACS") // live MACs are original again
 	if !quiet {
 		ui.Progress("MAC addresses restored", 100)
 	}
@@ -149,6 +162,18 @@ func (o *Orchestrator) restoreMAC(quiet bool) Result {
 func (o *Orchestrator) applyNetIdent(opts Options) Result {
 	dry, quiet := opts.DryRun, opts.Quiet
 	ns := o.plat.NetIdentSpoofer()
+	// The Linux spoofer tracks its NFQUEUE rewriter daemon via a pid file
+	// in the state directory — tell it where that is.
+	if sd, ok := ns.(netident.StateDirAware); ok {
+		sd.SetStateDir(o.state.Dir())
+	}
+
+	// A caller that runs the rewriter under an external process manager
+	// (a systemd service) keeps the NFQUEUE rule but skips spawning the
+	// detached helper.
+	if rsc, ok := ns.(netident.RewriterSpawnControl); ok {
+		rsc.SetNoDaemon(opts.NoDaemon)
+	}
 
 	// Snapshot current state for rollback.
 	snap, err := ns.Current()
@@ -156,16 +181,24 @@ func (o *Orchestrator) applyNetIdent(opts Options) Result {
 		return Result{Operation: OpNetIdent, Err: fmt.Errorf("reading current state: %w", err)}
 	}
 
-	// Persist snapshot values to state file for later restore.
-	o.state.Set("ORIG_TTL", itoa(snap.TTL))
-	o.state.Set("ORIG_TCP_TIMESTAMPS", itoa(snap.TCPTimestamps))
-	o.state.Set("ORIG_TCP_WINDOW_SCALING", itoa(snap.TCPWindowScaling))
-	o.state.Set("ORIG_TCP_SACK", itoa(snap.TCPSACK))
-	o.state.Set("ORIG_TCP_ECN", itoa(snap.TCPECN))
-	o.state.Set("ORIG_RMEM_DEFAULT", itoa(snap.RmemDefault))
-	o.state.Set("ORIG_RMEM_MAX", itoa(snap.RmemMax))
-	o.state.Set("ORIG_WMEM_DEFAULT", itoa(snap.WmemDefault))
-	o.state.Set("ORIG_WMEM_MAX", itoa(snap.WmemMax))
+	// Persist original values to the state file for a later restore —
+	// but only capture them on the FIRST apply. When a persona is
+	// already active (re-apply without a restore in between), the live
+	// values are the spoofed ones; overwriting the saved baseline with
+	// them would make every later restore "restore" the persona's
+	// values, leaving the system fingerprinted forever.
+	if _, exists := o.state.Get("ORIG_TTL"); !exists {
+		o.state.Set("ORIG_TTL", itoa(snap.TTL))
+		o.state.Set("ORIG_TCP_TIMESTAMPS", itoa(snap.TCPTimestamps))
+		o.state.Set("ORIG_TCP_WINDOW_SCALING", itoa(snap.TCPWindowScaling))
+		o.state.Set("ORIG_TCP_SACK", itoa(snap.TCPSACK))
+		o.state.Set("ORIG_TCP_ECN", itoa(snap.TCPECN))
+		o.state.Set("ORIG_TCP_RFC1337", itoa(snap.TCPRFC1337))
+		o.state.Set("ORIG_RMEM_DEFAULT", itoa(snap.RmemDefault))
+		o.state.Set("ORIG_RMEM_MAX", itoa(snap.RmemMax))
+		o.state.Set("ORIG_WMEM_DEFAULT", itoa(snap.WmemDefault))
+		o.state.Set("ORIG_WMEM_MAX", itoa(snap.WmemMax))
+	}
 	o.state.Set("STATE_VERSION", "2")
 
 	// Determine persona type (default to Windows).
@@ -241,6 +274,10 @@ func (o *Orchestrator) applyNetIdent(opts Options) Result {
 
 func (o *Orchestrator) restoreNetIdent(quiet bool) Result {
 	ns := o.plat.NetIdentSpoofer()
+	// Same for restore: StopRewriterDaemon needs the state directory.
+	if sd, ok := ns.(netident.StateDirAware); ok {
+		sd.SetStateDir(o.state.Dir())
+	}
 
 	// Rebuild snapshot from saved state.
 	snap := &netident.Snapshot{
@@ -251,6 +288,7 @@ func (o *Orchestrator) restoreNetIdent(quiet bool) Result {
 	snap.TCPWindowScaling = atoi(o.stateGet("ORIG_TCP_WINDOW_SCALING", "1"))
 	snap.TCPSACK = atoi(o.stateGet("ORIG_TCP_SACK", "1"))
 	snap.TCPECN = atoi(o.stateGet("ORIG_TCP_ECN", "0"))
+	snap.TCPRFC1337 = atoi(o.stateGet("ORIG_TCP_RFC1337", "1"))
 	snap.RmemDefault = atoi(o.stateGet("ORIG_RMEM_DEFAULT", "212992"))
 	snap.RmemMax = atoi(o.stateGet("ORIG_RMEM_MAX", "212992"))
 	snap.WmemDefault = atoi(o.stateGet("ORIG_WMEM_DEFAULT", "212992"))
@@ -258,6 +296,19 @@ func (o *Orchestrator) restoreNetIdent(quiet bool) Result {
 
 	if err := ns.Restore(snap); err != nil {
 		return Result{Operation: OpNetIdent, Err: err}
+	}
+
+	// The baseline keys only mean anything while a persona is active:
+	// a successful restore puts the system back at its original values,
+	// so drop them. The next apply re-captures a fresh baseline, and
+	// corrupted or stale saved values cannot survive a cycle.
+	for _, key := range []string{
+		"ORIG_TTL", "ORIG_TCP_TIMESTAMPS", "ORIG_TCP_WINDOW_SCALING",
+		"ORIG_TCP_SACK", "ORIG_TCP_ECN", "ORIG_TCP_RFC1337",
+		"ORIG_RMEM_DEFAULT", "ORIG_RMEM_MAX", "ORIG_WMEM_DEFAULT", "ORIG_WMEM_MAX",
+		"PERSONA_TYPE",
+	} {
+		o.state.Delete(key)
 	}
 
 	if !quiet {
@@ -375,5 +426,5 @@ func (o *Orchestrator) stateGet(key, fallback string) string {
 	return fallback
 }
 
-func itoa(v int) string      { return strconv.Itoa(v) }
-func atoi(s string) int      { v, _ := strconv.Atoi(s); return v }
+func itoa(v int) string { return strconv.Itoa(v) }
+func atoi(s string) int { v, _ := strconv.Atoi(s); return v }

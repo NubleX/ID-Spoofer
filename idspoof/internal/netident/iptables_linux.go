@@ -44,8 +44,16 @@ func applyIPTables(p *Persona) error {
 		}
 	}
 
-	// Jump from POSTROUTING to our chain (add only if not already present).
-	if !jumpExists() {
+	// A plain apply scopes the chain to everyone, so sweep any
+	// owner-scoped jumps a crashed `serve --owner` left behind before
+	// the global jump gate below.
+	removeOwnerScopedJumps()
+
+	// Jump from POSTROUTING to our chain (add only if not already
+	// present). Check the exact global jump, not any jump to the chain:
+	// a stale owner-scoped jump left by a crashed `serve --owner` must
+	// not make a plain apply inherit the old single-user scoping.
+	if exec.Command("iptables", "-t", "mangle", "-C", "POSTROUTING", "-j", chainName).Run() != nil {
 		if err := run("iptables", "-t", "mangle", "-A", "POSTROUTING", "-j", chainName); err != nil {
 			return fmt.Errorf("adding jump: %w", err)
 		}
@@ -56,8 +64,21 @@ func applyIPTables(p *Persona) error {
 
 // removeIPTables cleans up all iptables rules added by applyIPTables.
 func removeIPTables() error {
-	// Remove the jump from POSTROUTING.
-	exec.Command("iptables", "-t", "mangle", "-D", "POSTROUTING", "-j", chainName).Run()
+	// Remove every jump into our chain from POSTROUTING — the plain global
+	// jump as well as any owner-scoped jump added by `serve --owner`.
+	if out, err := exec.Command("iptables", "-t", "mangle", "-S", "POSTROUTING").Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 4 || fields[0] != "-A" || fields[1] != "POSTROUTING" {
+				continue
+			}
+			if !strings.Contains(line, chainName) {
+				continue
+			}
+			args := append([]string{"-t", "mangle", "-D", "POSTROUTING"}, fields[2:]...)
+			exec.Command("iptables", args...).Run()
+		}
+	}
 
 	// Flush and delete our chain.
 	exec.Command("iptables", "-t", "mangle", "-F", chainName).Run()
@@ -68,6 +89,56 @@ func removeIPTables() error {
 	exec.Command("iptables", "-t", "mangle", "-F", "IDSPOOF_WINEMU").Run()
 	exec.Command("iptables", "-t", "mangle", "-X", "IDSPOOF_WINEMU").Run()
 
+	return nil
+}
+
+// removeOwnerScopedJumps removes every owner-scoped jump to the chain
+// from POSTROUTING — the `-m owner --uid-owner` form that only a
+// scoped serve installs. Crashed scoped sessions leave these behind,
+// and they must not survive a plain apply (next to the global jump
+// they would double-divert the old owner's traffic into the chain)
+// or a re-scope to another owner.
+func removeOwnerScopedJumps() {
+	if out, err := exec.Command("iptables", "-t", "mangle", "-S", "POSTROUTING").Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 4 || fields[0] != "-A" || fields[1] != "POSTROUTING" {
+				continue
+			}
+			if !strings.Contains(line, chainName) || !strings.Contains(line, "-m owner") {
+				continue
+			}
+			args := append([]string{"-t", "mangle", "-D", "POSTROUTING"}, fields[2:]...)
+			exec.Command("iptables", args...).Run()
+		}
+	}
+}
+
+// ScopeToOwners narrows the mangle chain to the listed users' traffic:
+// the global POSTROUTING jump is replaced with one uid-owner-scoped
+// jump per user, so packets from every other user pass through
+// unmodified.
+func ScopeToOwners(owners []string) error {
+	// Drop the global jump (may already be gone).
+	exec.Command("iptables", "-t", "mangle", "-D", "POSTROUTING", "-j", chainName).Run()
+	// Drop every owner-scoped jump a previous session left behind —
+	// including owners not in this list — so the scope is exactly the
+	// users given here.
+	removeOwnerScopedJumps()
+	// One jump per user, deduped: iptables allows duplicate identical
+	// rules, and a duplicate would double-queue that user's SYNs.
+	seen := make(map[string]struct{}, len(owners))
+	for _, owner := range owners {
+		if _, dup := seen[owner]; dup {
+			continue
+		}
+		seen[owner] = struct{}{}
+		// iptables resolves the user name to a UID at install time; a
+		// missing user is an error.
+		if err := run("iptables", "-t", "mangle", "-A", "POSTROUTING", "-m", "owner", "--uid-owner", owner, "-j", chainName); err != nil {
+			return fmt.Errorf("scoping to user %q: %w", owner, err)
+		}
+	}
 	return nil
 }
 

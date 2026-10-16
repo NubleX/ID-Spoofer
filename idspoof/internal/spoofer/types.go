@@ -29,6 +29,7 @@ type Options struct {
 	TunnelCfg   string // path to tunnel config file
 	DryRun      bool
 	Quiet       bool
+	NoDaemon    bool // netident: don't start the rewriter daemon; an external manager owns the queue
 }
 
 // AllOps returns an Options that enables every operation (except tunnel).
