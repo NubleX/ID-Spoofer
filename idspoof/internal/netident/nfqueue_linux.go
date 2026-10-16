@@ -14,7 +14,15 @@ import (
 	"fmt"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
+)
+
+// SOL_NETLINK socket options.
+const (
+	solNetlink         = 270
+	netlinkNoENOBUFS   = 5
+	netlinkRcvbufForce = 33
 )
 
 // NFNETLINK constants (from linux/netfilter/nfnetlink.h).
@@ -76,6 +84,16 @@ func (r *NFQueueRewriter) Start() error {
 		return fmt.Errorf("binding netlink socket: %w", err)
 	}
 
+	// Tell the kernel to silently drop packets instead of returning ENOBUFS
+	// when our userspace can't keep up. Without this, recvfrom returns
+	// ENOBUFS in a tight loop and pins a CPU at 100%.
+	one := 1
+	syscall.SetsockoptInt(fd, solNetlink, netlinkNoENOBUFS, one)
+
+	// Bump the netlink receive buffer well above the default so brief bursts
+	// of SYN traffic don't immediately overflow.
+	syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, 4*1024*1024)
+
 	// Send config: bind to queue.
 	if err := r.sendConfig(nfqnlCfgCmdBind); err != nil {
 		syscall.Close(fd)
@@ -126,6 +144,12 @@ func (r *NFQueueRewriter) loop(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+			// EINTR is fine, retry immediately. Anything else: back off so a
+			// persistently-erroring socket can't pin the CPU.
+			if err == syscall.EINTR {
+				continue
+			}
+			time.Sleep(10 * time.Millisecond)
 			continue
 		}
 		if n < 16 {

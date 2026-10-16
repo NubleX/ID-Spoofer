@@ -5,6 +5,24 @@ All notable changes to the ID-Spoofer project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.6] - 2026-10-16
+
+### Fixed
+
+- **TCP stalls after handshake** - the NFQUEUE rewriter now preserves the kernel's real MSS and window scale from the original SYN instead of substituting persona defaults. Only the option order (what passive fingerprinters key on) is rewritten; persona values are used only when the SYN carries no such option
+- **Mullvad / VPN breakage** - the persona no longer rewrites `net.core.{r,w}mem_*` or `net.ipv4.tcp_{r,w}mem`; changing these global buffer defaults caused Mullvad's firewall policy upload to fail with EMSGSIZE. The window scale is injected directly into SYN packets instead
+- **iOS persona** - buffer sysctl values no longer exceed INT32_MAX, which the Linux kernel rejects
+- **Persona switching** - a running rewriter is stopped before a new one starts, so queue 42 never has two readers
+- **CPU pinning** - the NFQUEUE socket sets `NETLINK_NO_ENOBUFS`, uses a 4 MB receive buffer, retries on EINTR and backs off 10 ms on persistent socket errors
+
+### Changed
+
+- iptables MSS rule uses `--clamp-mss-to-pmtu` instead of `--set-mss`, so SYNs on WireGuard/OpenVPN interfaces are not oversized
+- NFQUEUE rule uses `--queue-bypass`, so SYNs pass through unmodified rather than being dropped when no rewriter is attached (avoids VPN kill-switch leak alerts)
+- Sysctl set reduced to TTL, tcp_timestamps, tcp_window_scaling, tcp_sack, tcp_ecn and tcp_rfc1337
+
+---
+
 ## [2.0.5] - 2026-02-28
 
 ### Added
