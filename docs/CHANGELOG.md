@@ -5,26 +5,21 @@ All notable changes to the ID-Spoofer project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- **Persistent NFQUEUE rewriter** — `apply --netident` now spawns a detached helper process (`idspoof __rewriter`, its own session, PID tracked in `rewriter.pid` in the state dir) that outlives the CLI. Re-applying with the same persona reuses the running daemon; a different persona replaces it. `restore --netident` stops it.
-- `idspoof status` (and the TUI Status tab) now report real rewriter liveness (pid file + process check) and flag the **STALE** state: iptables rule present but no live rewriter — the condition where queued SYNs get dropped and new TCP connections time out.
-- **`idspoof serve`** — new foreground "managed" mode: applies the selected operations (all three by default, like `apply`; individual flags to narrow, e.g. `--netident` for persona + rewriter only), runs the NFQUEUE rewriter in-process, and restores everything on SIGTERM/SIGINT. `--owner <user>` scopes the mangle chain to specific users' traffic — one `iptables -m owner` jump per user, repeatable or comma-separated (`--owner obscura,searxng`), removed on restore. Meant to run under systemd: a crash or SIGKILL is safe (the supervisor restarts it and re-apply is idempotent), and a clean stop leaves the machine in its original state.
+## [2.0.6] - 2026-10-16
 
 ### Fixed
 
-- **Network outage after `apply`** — the rewriter's NFQUEUE netlink messages didn't match the running kernel's UAPI, so the kernel rejected every verdict with `EINVAL (errno 22)` and the queue-lifetime timer then dropped every queued SYN:
-  - `NFQA_VERDICT_HDR` was emitted as attribute type 1; this kernel's `nfqnl_attr_type` makes it type **2**, so the kernel's `nla_find_attr()` found no verdict header and bailed with `EINVAL`
-  - `nfqnl_msg_verdict_hdr` is `{verdict, id}` (verdict first, 8 bytes), not the legacy `{id, verdict, data}` the code encoded
-  - `nfqnl_msg_config_cmd` is `{command, _pad, pf}` with no queue field (the queue comes from `nfgenmsg.res_id`); the address family was being written into `res_id` instead
-  - `nfqnl_msg_config_params` is a packed 5-byte `{copy_range, copy_mode}`, not 8
-  - the socket bound without joining the queue multicast group `1<<NFNL_SUBSYS_QUEUE`
-- `idspoof status` reported "NFQUEUE rewriter: Active" from the presence of the iptables rule alone, and dumped the legacy `IDSPOOF_WINEMU` chain instead of `IDSPOOF_NETEMU`
-- **`restore --netident` left the system fingerprinted** — every `apply` re-captured the *current* live sysctls and overwrote the saved `ORIG_*` originals. Re-applying without a restore in between therefore recorded the persona's own values (TTL=128, timestamps=0, …) as the "originals", so a later `restore` "restored" to those values and the host stayed fingerprinted. The baseline is now captured on the first apply only and cleared on a successful `restore`, so each cycle re-captures a clean original. Also, `net.ipv4.tcp_rfc1337` was written on apply/restore but never saved, so `restore` forced it to 0 even when the host default was 1.
-- The `[spoofed]` MAC markers in `status` now key off the values recorded as spoofed (`SPOOFED_MACS`) instead of comparing against the `ORIG_MACS` baseline, so a docker bridge that rotated its own MAC can no longer masquerade as active spoofing; the marker is cleared on restore. The MAC baseline is also captured on the first apply only (the same first-apply-only rule the netident sysctl baselines got), so re-applying can no longer re-baseline rotated live values.
-- **Crashed `serve --owner` left stale scoped jumps** — a plain apply or re-scope would install its jumps next to the owner-scoped jumps a crashed session left in POSTROUTING, double-diverting the old owner's traffic through the chain; apply and re-scoping now sweep every owner-scoped jump first, so a global apply leaves exactly one global jump and a scoped one leaves exactly its users' jumps. `serve` apply failures now report which operation(s) failed instead of a bare "apply failed".
+- **TCP stalls after handshake** - the NFQUEUE rewriter now preserves the kernel's real MSS and window scale from the original SYN instead of substituting persona defaults. Only the option order (what passive fingerprinters key on) is rewritten; persona values are used only when the SYN carries no such option
+- **Mullvad / VPN breakage** - the persona no longer rewrites `net.core.{r,w}mem_*` or `net.ipv4.tcp_{r,w}mem`; changing these global buffer defaults caused Mullvad's firewall policy upload to fail with EMSGSIZE. The window scale is injected directly into SYN packets instead
+- **iOS persona** - buffer sysctl values no longer exceed INT32_MAX, which the Linux kernel rejects
+- **Persona switching** - a running rewriter is stopped before a new one starts, so queue 42 never has two readers
+- **CPU pinning** - the NFQUEUE socket sets `NETLINK_NO_ENOBUFS`, uses a 4 MB receive buffer, retries on EINTR and backs off 10 ms on persistent socket errors
+
+### Changed
+
+- iptables MSS rule uses `--clamp-mss-to-pmtu` instead of `--set-mss`, so SYNs on WireGuard/OpenVPN interfaces are not oversized
+- NFQUEUE rule uses `--queue-bypass`, so SYNs pass through unmodified rather than being dropped when no rewriter is attached (avoids VPN kill-switch leak alerts)
+- Sysctl set reduced to TTL, tcp_timestamps, tcp_window_scaling, tcp_sack, tcp_ecn and tcp_rfc1337
 
 ---
 

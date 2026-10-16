@@ -121,6 +121,43 @@ func extractTimestamp(opts []byte) (tsVal, tsEcr uint32, found bool) {
 	return 0, 0, false
 }
 
+// extractKernelTCPParams parses TCP options to find the kernel's actual MSS
+// (Kind=2) and Window Scale (Kind=3). These MUST be preserved when rewriting,
+// otherwise the kernel and the remote peer will compute window values
+// differently and the TCP connection will stall after handshake even though
+// it appears to establish. We can lie about option ORDER (which is what
+// passive fingerprinters key on) but we cannot lie about these values.
+func extractKernelTCPParams(opts []byte) (mss uint16, wscale uint8, mssFound, wsFound bool) {
+	i := 0
+	for i < len(opts) {
+		kind := opts[i]
+		switch kind {
+		case 0: // EOL
+			return
+		case 1: // NOP
+			i++
+		default:
+			if i+1 >= len(opts) {
+				return
+			}
+			length := int(opts[i+1])
+			if length < 2 || i+length > len(opts) {
+				return
+			}
+			switch {
+			case kind == 2 && length == 4:
+				mss = binary.BigEndian.Uint16(opts[i+2 : i+4])
+				mssFound = true
+			case kind == 3 && length == 3:
+				wscale = opts[i+2]
+				wsFound = true
+			}
+			i += length
+		}
+	}
+	return
+}
+
 // personaWScale returns the TCP window scale factor for each persona.
 func personaWScale(p PersonaType) uint8 {
 	switch p {
@@ -231,10 +268,20 @@ func rewriteSYNPacket(pkt []byte) ([]byte, error) {
 	// Extract original TCP options for timestamp preservation.
 	origOpts := pkt[tcpStart+20 : tcpStart+tcpDataOff]
 
-	// Determine the active persona and look up the correct wscale.
+	// Use the kernel's REAL mss and wscale, not the persona defaults.
+	// Lying about these to the remote peer corrupts TCP windowing because
+	// our own kernel keeps using its true values internally — handshake
+	// completes, then data transfer stalls. Persona defaults are only the
+	// fallback when the original SYN didn't carry the option at all.
 	persona, _ := activePersona.Load().(PersonaType)
-	wscale := personaWScale(persona)
-	newOpts := buildTCPOptions(persona, 1460, wscale, origOpts)
+	realMSS, realWScale, mssFound, wsFound := extractKernelTCPParams(origOpts)
+	if !mssFound {
+		realMSS = 1460
+	}
+	if !wsFound {
+		realWScale = personaWScale(persona)
+	}
+	newOpts := buildTCPOptions(persona, realMSS, realWScale, origOpts)
 
 	// Pad to 4-byte boundary.
 	for len(newOpts)%4 != 0 {
@@ -322,9 +369,13 @@ func recalcTCPChecksum(pkt []byte, ihl int) {
 // through our NFQUEUE for rewriting.
 func installNFQueueRule() error {
 	// Only intercept SYN packets (not SYN+ACK or others) on OUTPUT.
+	// --queue-bypass: if no userspace reader is attached (e.g. during persona
+	// transitions), packets pass through unmodified instead of being dropped.
+	// This prevents Mullvad/VPN kill-switches from seeing dropped packets as leaks.
 	return run("iptables", "-t", "mangle", "-A", chainName,
 		"-p", "tcp", "--tcp-flags", "SYN,ACK,RST", "SYN",
-		"-j", "NFQUEUE", "--queue-num", fmt.Sprintf("%d", nfqueueNum))
+		"-j", "NFQUEUE", "--queue-num", fmt.Sprintf("%d", nfqueueNum),
+		"--queue-bypass")
 }
 
 // removeNFQueueRule removes the NFQUEUE rule (handled by removeIPTables which

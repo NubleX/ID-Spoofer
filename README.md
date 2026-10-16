@@ -1,10 +1,10 @@
 <div align="center">
   <img src="assets/images/logo.png" alt="ID-Spoofer Logo" width="400"/>
 
-# ID-Spoofer v2.0.5
+# ID-Spoofer v2.0.6
 
 ![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
-![Version](https://img.shields.io/badge/version-2.0.5-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.6-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
 ![Language](https://img.shields.io/badge/language-Go-00ADD8.svg)
 ![Status](https://img.shields.io/badge/status-active-brightgreen.svg)
@@ -74,9 +74,9 @@ When you run `idspoof apply`, five layers activate simultaneously:
 
 | Layer | What changes | Effect |
 |-------|-------------|--------|
-| **sysctl** | TTL, tcp_timestamps, tcp_sack, tcp_ecn, window buffers | Kernel-level TCP/IP parameters matching the selected OS |
-| **iptables** | `IDSPOOF_NETEMU` mangle chain | Forces correct TTL on outgoing packets, clamps MSS=1460 on SYN |
-| **NFQUEUE** (queue 42) | Intercepts outgoing SYN packets via a detached helper process | Rewrites IP ID (Linux=0 → incrementing) and reorders TCP options to match OS layout. The helper (`idspoof __rewriter`, PID in `rewriter.pid` in the state dir) outlives the CLI, so the persona persists after `apply` exits; `restore` stops it. `idspoof serve` runs the same rewriter in the foreground — it lives while the command runs and is stopped on SIGTERM/SIGINT |
+| **sysctl** | TTL, tcp_timestamps, tcp_window_scaling, tcp_sack, tcp_ecn, tcp_rfc1337 | Kernel-level TCP/IP parameters matching the selected OS |
+| **iptables** | `IDSPOOF_NETEMU` mangle chain | Forces correct TTL on outgoing packets, clamps MSS to path MTU on SYN |
+| **NFQUEUE** (queue 42) | Intercepts outgoing SYN packets | Rewrites IP ID (Linux=0 → incrementing) and reorders TCP options to match OS layout |
 | **DHCP** | Option 12 (hostname) + Option 60 (vendor class, Windows only) | Router sees appropriate hostname (e.g., `DESKTOP-A1B2C3D` or `Admins-MacBook-Pro`) |
 | **mDNS** | Stops Avahi (Windows) or leaves it running (macOS/iOS) | Controls hostname visibility on local network |
 

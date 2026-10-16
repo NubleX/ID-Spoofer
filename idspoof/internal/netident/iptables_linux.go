@@ -26,12 +26,16 @@ func applyIPTables(p *Persona) error {
 	}
 
 	// Add rules to our chain.
+	// MSS uses --clamp-mss-to-pmtu instead of --set-mss: on physical Ethernet
+	// (1500 MTU) this produces MSS=1460 — matching the persona's advertised
+	// value — but on a WireGuard/OpenVPN interface with a smaller MTU it clamps
+	// to the actual path, so inner SYN packets don't get silently dropped for
+	// being oversized. Modern Windows/macOS clients do path MTU discovery too,
+	// so a VPN-adjusted MSS is indistinguishable from native behavior.
 	rules := [][]string{
-		// TTL → 128 on all outgoing.
 		{"-t", "mangle", "-A", chainName, "-j", "TTL", "--ttl-set", fmt.Sprintf("%d", p.TTL)},
-		// MSS → 1460 on SYN packets (matches Windows Ethernet default).
 		{"-t", "mangle", "-A", chainName, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN",
-			"-j", "TCPMSS", "--set-mss", fmt.Sprintf("%d", p.MSS)},
+			"-j", "TCPMSS", "--clamp-mss-to-pmtu"},
 	}
 
 	for _, r := range rules {

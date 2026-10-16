@@ -112,9 +112,11 @@ func IOSPersona(hostname string) Persona {
 	p := MacOSPersona(hostname)
 	p.Type = PersonaiOS
 	p.WScale = 16
-	// iOS wscale=16 → 65535 * 65536 = 4294901760.
-	p.RmemMax = 4294901760
-	p.WmemMax = 4294901760
+	// wscale=16 is written directly into SYN packets by the NFQUEUE rewriter.
+	// The sysctl buffer values just need to be large enough to not cap the
+	// advertised window — Linux kernel rejects values above INT32_MAX (~2GB).
+	p.RmemMax = 2147483647
+	p.WmemMax = 2147483647
 	return p
 }
 
