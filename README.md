@@ -1,10 +1,10 @@
 <div align="center">
   <img src="assets/images/logo.png" alt="ID-Spoofer Logo" width="400"/>
 
-# ID-Spoofer v2.0.6
+# ID-Spoofer v2.0.7
 
 ![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
-![Version](https://img.shields.io/badge/version-2.0.6-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.7-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
 ![Language](https://img.shields.io/badge/language-Go-00ADD8.svg)
 ![Status](https://img.shields.io/badge/status-active-brightgreen.svg)
@@ -273,6 +273,7 @@ Thanks to the teams whose open-source work makes this possible:
 - **[Charm](https://github.com/charmbracelet)** — [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss) power the interactive TUI. Genuinely excellent libraries.
 - **[spf13/cobra](https://github.com/spf13/cobra)** — the CLI framework behind every subcommand.
 - **[pythops/oryx](https://github.com/pythops/oryx)** — TUI network traffic monitor whose design inspired the Traffic tab's live bandwidth and connection display.
+- **[anthonyalayo]([https://github.com/anthonyalayo])** — Helping me improve the project.
 
 ## Legal disclaimer
 
