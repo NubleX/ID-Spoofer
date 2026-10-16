@@ -29,6 +29,14 @@ func (s *linuxSpoofer) Current() (*Snapshot, error) {
 func (s *linuxSpoofer) Apply(p Persona) error {
 	var errs []string
 
+	// Stop any running rewriter before starting a new one — queue 42 can only
+	// have one reader, and switching personas re-enters Apply() with the old
+	// rewriter still holding the socket.
+	if s.rewriter != nil {
+		s.rewriter.Stop()
+		s.rewriter = nil
+	}
+
 	// Store the active persona type so the NFQUEUE rewriter goroutine can
 	// build the correct TCP options layout.
 	activePersona.Store(p.Type)
