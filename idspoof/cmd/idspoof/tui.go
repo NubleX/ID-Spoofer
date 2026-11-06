@@ -139,6 +139,9 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "b", "B":
+			return m.openBoot(), nil
+
 		case "s", "S":
 			// Manual rescan.
 			m.dashboard.scanning = true
@@ -184,6 +187,9 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(fetchLiveCmd(), liveTickCmd())
 	case openFormMsg:
 		return m.openPresets(msg.tunnel), nil
+	case bootDoneMsg:
+		m.lastMsg, m.lastOK = msg.text, msg.ok
+		return m, nil
 	case openGenMsg:
 		return m.openGen(), nil
 	case openPasteMsg:
@@ -408,6 +414,7 @@ func (m mainModel) renderHelpBar() string {
 		{"R", "Restore"},
 		{"S", "Scan"},
 		{"L", "Last result"},
+		{"B", "Boot"},
 		{"Tab", "Switch"},
 		{"1-5", "Jump"},
 		{"\u2191\u2193/jk", "Nav"},

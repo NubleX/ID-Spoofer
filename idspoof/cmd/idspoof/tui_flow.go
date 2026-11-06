@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/boot"
 	"github.com/NubleX/ID-Spoofer/idspoof/internal/netident"
 	"github.com/NubleX/ID-Spoofer/idspoof/internal/profile"
 	"github.com/NubleX/ID-Spoofer/idspoof/internal/spoofer"
@@ -32,6 +34,7 @@ const (
 	ovPaste
 	ovPreset
 	ovGen
+	ovBoot
 )
 
 // flowModel is the modal layer drawn over the tabs: previews, progress,
@@ -72,6 +75,12 @@ type flowModel struct {
 
 	// generator overlay contents.
 	genLines []string
+
+	// boot overlay: what is saved, what is selected, why it cannot be saved.
+	bootNow  boot.Config
+	bootProp boot.Config
+	bootErr  string
+	bootSvc  string
 	formErr  string
 	tunnel   string
 }
@@ -310,6 +319,8 @@ func (m mainModel) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.flow.kind = ovRunning
 		m.flow.title = "Restoring"
 		return m, tea.Batch(m.flow.spin.Tick, runRestoreCmd("Restore", opts))
+	case ovBoot:
+		return m.updateBoot(k)
 	case ovGen:
 		switch k {
 		case "enter", "r", "R":
@@ -636,6 +647,95 @@ func (m mainModel) openGen() mainModel {
 	return m
 }
 
+// ── Boot profile ────────────────────────────────────────────────────────────
+
+// proposedBoot turns the current Identity and Tunnel selection into a boot
+// profile.
+func (m mainModel) proposedBoot() boot.Config {
+	opts := m.identity.buildOpts()
+	bc := boot.Config{MAC: opts.MAC, SysInfo: opts.SysInfo}
+	if opts.NetIdent {
+		bc.Persona = string(opts.PersonaType)
+	}
+	if proto := m.tunnel.selectedTunnel(); proto != "" {
+		bc.Tunnel = proto
+		bc.Mode = m.tunnel.modeFor(proto)
+		if p := m.tunnel.pickedProfile(proto); p != nil {
+			bc.Profile = p.Name
+		}
+	}
+	return bc
+}
+
+func serviceState() string {
+	en := runCmd("systemctl", "is-enabled", "idspoof")
+	ac := runCmd("systemctl", "is-active", "idspoof")
+	if en == "N/A" && ac == "N/A" {
+		return "not installed (run the installer, or install the .deb package)"
+	}
+	return en + ", " + ac
+}
+
+func (m mainModel) openBoot() mainModel {
+	now, err := boot.Load(bootConfigPath)
+	m.flow.bootNow = now
+	m.flow.bootErr = ""
+	if err != nil {
+		m.flow.bootErr = "saved boot profile is invalid: " + err.Error()
+	}
+	m.flow.bootProp = m.proposedBoot()
+	if err := m.flow.bootProp.Validate(); err != nil && m.flow.bootErr == "" {
+		m.flow.bootErr = "selection cannot be saved: " + err.Error()
+	}
+	m.flow.bootSvc = serviceState()
+	m.flow.kind = ovBoot
+	m.flow.title = "Start at boot"
+	return m
+}
+
+type bootDoneMsg struct {
+	text string
+	ok   bool
+}
+
+func restartServiceCmd() tea.Cmd {
+	return func() tea.Msg {
+		out, err := exec.Command("systemctl", "restart", "idspoof").CombinedOutput()
+		if err != nil {
+			return bootDoneMsg{"restart failed: " + strings.TrimSpace(string(out)+" "+err.Error()), false}
+		}
+		return bootDoneMsg{"idspoof service restarted", true}
+	}
+}
+
+func (m mainModel) updateBoot(k string) (tea.Model, tea.Cmd) {
+	switch k {
+	case "s", "S", "r", "R":
+		if m.flow.bootErr != "" && m.flow.bootProp.Validate() != nil {
+			return m, nil
+		}
+		if err := boot.Save(bootConfigPath, m.flow.bootProp); err != nil {
+			m.flow.bootErr = "save failed: " + err.Error()
+			return m, nil
+		}
+		m.flow.kind = ovNone
+		m.lastMsg, m.lastOK = "boot profile saved: "+m.flow.bootProp.Summary(), true
+		if k == "r" || k == "R" {
+			return m, restartServiceCmd()
+		}
+	case "c", "C":
+		if err := boot.Clear(bootConfigPath); err != nil {
+			m.flow.bootErr = "clear failed: " + err.Error()
+			return m, nil
+		}
+		m.flow.kind = ovNone
+		m.lastMsg, m.lastOK = "boot profile cleared", true
+	case "esc":
+		m.flow.kind = ovNone
+	}
+	return m, nil
+}
+
 // ── Overlay rendering ───────────────────────────────────────────────────────
 
 func boxStyle(border lipgloss.Color, width int) lipgloss.Style {
@@ -709,6 +809,24 @@ func (m mainModel) viewOverlay(width int) string {
 		}
 		b.WriteString("\n" + sCursor.Render("[Esc]") + sHelpBar.Render(" cancel"))
 		return boxStyle(colorCyan, w).Render(b.String())
+	case ovBoot:
+		b.WriteString(sPanelTitle.Render(f.title) + "\n\n")
+		b.WriteString(fmt.Sprintf("%-22s %s\n", sTableHeader.Render("Saved boot profile"), sTableRow.Render(f.bootNow.Summary())))
+		b.WriteString(fmt.Sprintf("%-22s %s\n", sTableHeader.Render("Selected in the TUI"), sChecked.Render(f.bootProp.Summary())))
+		b.WriteString(fmt.Sprintf("%-22s %s\n\n", sTableHeader.Render("Service"), sTableRow.Render(f.bootSvc)))
+		note := "The service starts before the network, so the MAC and persona are already spoofed on the first DHCP request. " +
+			"Boot changes have no revert guard. Recovery: add idspoof.disable=1 to the kernel command line, or run: idspoof restore"
+		for _, l := range wrapLines([]string{note}, w-6) {
+			b.WriteString(sTableDim.Render(l) + "\n")
+		}
+		if f.bootErr != "" {
+			b.WriteString("\n" + sFail.Render("x "+f.bootErr) + "\n")
+		}
+		b.WriteString("\n" + sCursor.Render("[S]") + sHelpBar.Render(" save selection   ") +
+			sCursor.Render("[R]") + sHelpBar.Render(" save and restart service   ") +
+			sCursor.Render("[C]") + sHelpBar.Render(" clear   ") +
+			sCursor.Render("[Esc]") + sHelpBar.Render(" close"))
+		return boxStyle(colorYellow, w).Render(b.String())
 	case ovGen:
 		b.WriteString(sPanelTitle.Render(f.title) + "\n\n")
 		for _, l := range f.genLines {

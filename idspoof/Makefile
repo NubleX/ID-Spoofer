@@ -1,6 +1,7 @@
 BINARY     := idspoof
 MODULE     := github.com/NubleX/ID-Spoofer/idspoof
-VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# Match only release tags (v2.0.8); older "idspoof/v..." tags would give a wrong version.
+VERSION    ?= $(shell git describe --tags --match "v[0-9]*" --always --dirty 2>/dev/null || echo "dev")
 COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS    := -X $(MODULE)/internal/config.Version=$(VERSION) \
@@ -10,7 +11,7 @@ LDFLAGS    := -X $(MODULE)/internal/config.Version=$(VERSION) \
 BIN_DIR    := bin
 CMD_DIR    := ./cmd/idspoof
 
-.PHONY: all build build-all clean test lint install
+.PHONY: all build build-all clean test lint install uninstall snapshot
 
 all: build
 
@@ -40,6 +41,14 @@ lint:
 clean:
 	rm -rf $(BIN_DIR)
 
+# Installs the binary, boot daemon (systemd), menu entry and icon.
 install: build
-	@echo "Installing to /usr/local/bin/$(BINARY)"
-	install -m 755 $(BIN_DIR)/$(BINARY) /usr/local/bin/$(BINARY)
+	BIN=$(BIN_DIR)/$(BINARY) sh packaging/install.sh install
+
+uninstall:
+	sh packaging/install.sh uninstall
+
+# Local release build (archives, .deb, .rpm) into ../dist without publishing.
+# Needs goreleaser: https://goreleaser.com/install/
+snapshot:
+	cd .. && goreleaser release --snapshot --clean

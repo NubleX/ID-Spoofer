@@ -48,3 +48,18 @@ func TestInterfacesFromStateStringEmpty(t *testing.T) {
 		t.Errorf("expected nil for empty string, got %v", got)
 	}
 }
+
+func TestMergeOriginals(t *testing.T) {
+	saved := []InterfaceMAC{{Name: "wlan0", MAC: "aa:aa:aa:aa:aa:aa"}}
+	current := []InterfaceMAC{
+		{Name: "wlan0", MAC: "02:00:00:00:00:01"}, // already spoofed: must not replace the saved original
+		{Name: "usb0", MAC: "bb:bb:bb:bb:bb:bb"},  // new interface: added
+	}
+	got := MergeOriginals(saved, current)
+	if len(got) != 2 || got[0] != saved[0] || got[1] != current[1] {
+		t.Errorf("MergeOriginals = %+v", got)
+	}
+	if got := MergeOriginals(nil, current); len(got) != 2 {
+		t.Errorf("with nothing saved want all current, got %+v", got)
+	}
+}

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ID-Spoofer
+GenericName=Identity Spoofer
+Comment=MAC, network persona, tunnels and the boot daemon in one terminal UI
+Exec=sudo /usr/bin/idspoof menu
+Icon=idspoof
+Terminal=true
+Categories=System;Security;
+Keywords=spoof;mac;privacy;vpn;tunnel;tor;wireguard;pentest;anonymity;
+StartupNotify=false

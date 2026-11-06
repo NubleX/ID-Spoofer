@@ -28,13 +28,91 @@ builds:
 
 archives:
   - id: default
-    format: tar.gz
+    formats:
+      - tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats:
+          - zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    wrap_in_directory: true
     files:
       - README.md
+      - LICENSE
+      - src: idspoof/packaging/install.sh
+        dst: install.sh
+        info: {mode: 0755}
+      - src: idspoof/packaging/systemd/idspoof.service
+        dst: packaging/systemd/idspoof.service
+      - src: idspoof/packaging/idspoof.desktop
+        dst: packaging/idspoof.desktop
+      - src: idspoof/packaging/icons/*.png
+        dst: packaging/icons
+      - src: idspoof/packaging/tun2socks.example.yaml
+        dst: packaging/tun2socks.example.yaml
+      - src: idspoof/packaging/networkmanager/99-mullvad-ufw
+        dst: packaging/networkmanager/99-mullvad-ufw
+
+# Native packages: the daemon unit, menu entry and icon are installed by the
+# package itself; the scripts enable the unit on install.
+nfpms:
+  - id: packages
+    package_name: idspoof
+    ids:
+      - idspoof
+    formats:
+      - deb
+      - rpm
+    vendor: ID ArtCraft
+    homepage: https://idarti.com
+    maintainer: NubleX <id@idarti.com>
+    description: |-
+      Identity spoofing toolkit with a boot daemon and terminal UI.
+      Randomises MAC addresses, projects an OS network persona, and runs
+      tunnels (Tor, WireGuard, I2P, Shadowsocks, QUIC, tun2socks).
+    license: GPL-3.0-or-later
+    section: net
+    priority: optional
+    bindir: /usr/bin
+    recommends:
+      - iproute2
+      - iptables
+    contents:
+      - src: idspoof/packaging/systemd/idspoof.service
+        dst: /usr/lib/systemd/system/idspoof.service
+        file_info:
+          mode: 0644
+      - src: idspoof/packaging/idspoof.desktop
+        dst: /usr/share/applications/idspoof.desktop
+        file_info:
+          mode: 0644
+      - src: idspoof/packaging/icons/idspoof-256.png
+        dst: /usr/share/icons/hicolor/256x256/apps/idspoof.png
+        file_info:
+          mode: 0644
+      - src: idspoof/packaging/icons/idspoof-48.png
+        dst: /usr/share/icons/hicolor/48x48/apps/idspoof.png
+        file_info:
+          mode: 0644
+      - src: LICENSE
+        dst: /usr/share/doc/idspoof/copyright
+        file_info:
+          mode: 0644
+      - dst: /etc/idspoof
+        type: dir
+        file_info:
+          mode: 0755
+      - src: idspoof/packaging/tun2socks.example.yaml
+        dst: /usr/share/doc/idspoof/examples/tun2socks.example.yaml
+        file_info:
+          mode: 0644
+      - src: idspoof/packaging/networkmanager/99-mullvad-ufw
+        dst: /usr/share/doc/idspoof/examples/99-mullvad-ufw
+        file_info:
+          mode: 0755
+    scripts:
+      postinstall: idspoof/packaging/scripts/postinstall.sh
+      preremove: idspoof/packaging/scripts/preremove.sh
 
 checksum:
   name_template: "checksums.txt"
@@ -49,4 +127,6 @@ release:
     ---
     **Igor Dunaev (NubleX)** · [idarti.com](https://www.idarti.com) · [GitHub](https://github.com/NubleX)
 
-    > Download the binary for your platform above, verify with `checksums.txt`, and run with `sudo`.
+    > **Debian / Ubuntu / Kali:** `sudo apt install ./idspoof_*_linux_amd64.deb` (installs the boot daemon, menu entry and icon).
+    > **Other Linux:** unpack the `.tar.gz` and run `sudo ./install.sh`.
+    > Verify downloads with `checksums.txt`.

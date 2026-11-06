@@ -21,6 +21,25 @@ type Spoofer interface {
 	Verify(iface string, expected net.HardwareAddr) error
 }
 
+// MergeOriginals combines the originals already saved with the interfaces
+// seen now. A saved entry always wins: re-applying while MACs are already
+// spoofed must not replace the true hardware address with a spoofed one.
+// Interfaces that appeared since (a USB NIC, say) are added.
+func MergeOriginals(saved, current []InterfaceMAC) []InterfaceMAC {
+	have := make(map[string]bool, len(saved))
+	out := make([]InterfaceMAC, 0, len(saved)+len(current))
+	for _, i := range saved {
+		have[i.Name] = true
+		out = append(out, i)
+	}
+	for _, i := range current {
+		if !have[i.Name] {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
 // InterfacesToStateString serialises a slice of InterfaceMAC to the bash-
 // compatible state format: "eth0:02:ab:cd:ef:12:34;wlan0:02:..."
 func InterfacesToStateString(ifaces []InterfaceMAC) string {
