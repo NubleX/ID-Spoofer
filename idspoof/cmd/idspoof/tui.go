@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/NubleX/ID-Spoofer/idspoof/internal/config"
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/profile"
 	"github.com/NubleX/ID-Spoofer/idspoof/internal/spoofer"
 )
 
@@ -42,6 +43,9 @@ type mainModel struct {
 	lastMsg string
 	lastOK  bool
 
+	flow     flowModel
+	liveLoop bool // a live-tunnel refresh loop is running
+
 	quitting bool
 }
 
@@ -55,6 +59,7 @@ func newMainModel() mainModel {
 		tunnel:    newTunnelModel(),
 		traffic:   newTrafficModel(),
 		status:    newStatusModel(),
+		flow:      newFlowModel(),
 	}
 }
 
@@ -72,8 +77,15 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			m.quitting = true
+			return m, tea.Quit
+		}
+		if m.flow.kind != ovNone {
+			return m.updateOverlay(msg)
+		}
 		switch msg.String() {
-		case "ctrl+c", "q", "Q":
+		case "q", "Q":
 			m.quitting = true
 			return m, tea.Quit
 
@@ -81,48 +93,50 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "tab":
 			m.activeTab = (m.activeTab + 1) % tab(len(tabNames))
 			m.lastMsg = ""
-			return m, m.restartSpinnerIfNeeded()
+			return m, m.enterTab()
 		case "shift+tab":
 			m.activeTab = (m.activeTab - 1 + tab(len(tabNames))) % tab(len(tabNames))
 			m.lastMsg = ""
-			return m, m.restartSpinnerIfNeeded()
+			return m, m.enterTab()
 		case "1":
 			m.activeTab = tabDashboard
 			m.lastMsg = ""
-			return m, m.restartSpinnerIfNeeded()
+			return m, m.enterTab()
 		case "2":
 			m.activeTab = tabIdentity
 			m.lastMsg = ""
-			return m, nil
+			return m, m.enterTab()
 		case "3":
 			m.activeTab = tabTunnel
 			m.lastMsg = ""
-			return m, nil
+			return m, m.enterTab()
 		case "4":
 			m.activeTab = tabTraffic
 			m.lastMsg = ""
-			return m, m.restartSpinnerIfNeeded()
+			return m, m.enterTab()
 		case "5":
 			m.activeTab = tabStatus
 			m.lastMsg = ""
-			return m, nil
+			return m, m.enterTab()
 
 		// Global actions.
 		case "a", "A":
-			opts := m.identity.buildOpts()
-			opts.Tunnel = m.tunnel.selectedTunnel()
-			if !opts.MAC && !opts.NetIdent && !opts.SysInfo {
-				m.lastMsg = "Nothing selected \u2014 tick at least one operation."
-				m.lastOK = false
-			} else {
-				results := orch.Apply(opts)
-				m.lastMsg, m.lastOK = summariseResults(results)
-			}
-			return m, nil
+			return m.beginApply()
 
 		case "r", "R":
-			results := orch.Restore(spoofer.Options{MAC: true, NetIdent: true, Quiet: true})
-			m.lastMsg, m.lastOK = summariseResults(results)
+			m.flow.kind = ovRestore
+			return m, nil
+
+		case "l", "L":
+			if m.activeTab == tabTunnel && msg.String() == "l" {
+				break // l cycles profiles on the tunnel tab
+			}
+			if len(m.flow.last) > 0 {
+				m.flow.kind = ovResult
+				m.flow.title = m.flow.lastTitle + " result"
+				m.flow.lines = m.flow.last
+				m.flow.scroll = 0
+			}
 			return m, nil
 
 		case "s", "S":
@@ -134,6 +148,11 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Route spinner ticks only to the active tab to avoid ~10Hz re-renders
 	// of invisible tabs (which caused interface row flickering).
 	case spinner.TickMsg:
+		if m.flow.kind == ovRunning {
+			var cmd tea.Cmd
+			m.flow.spin, cmd = m.flow.spin.Update(msg)
+			cmds = append(cmds, cmd)
+		}
 		switch m.activeTab {
 		case tabDashboard:
 			var cmd tea.Cmd
@@ -149,6 +168,43 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(cmds...)
+
+	case opDoneMsg:
+		return m.handleOpDone(msg)
+	case guardTickMsg:
+		return m.handleGuardTick()
+	case liveMsg:
+		m.tunnel.live = msg
+		return m, nil
+	case liveTickMsg:
+		if m.activeTab != tabTunnel {
+			m.liveLoop = false
+			return m, nil
+		}
+		return m, tea.Batch(fetchLiveCmd(), liveTickCmd())
+	case openFormMsg:
+		if msg.tunnel == "tun2socks" {
+			return m.openForm(msg.tunnel), nil
+		}
+		return m.openPaste(msg.tunnel), nil
+	case openPasteMsg:
+		return m.openPaste(msg.tunnel), nil
+	case startTunnelMsg:
+		proto := m.tunnel.cursorProto()
+		if proto == "" {
+			m.lastMsg, m.lastOK = "select a tunnel first", false
+			return m, nil
+		}
+		opts, prof, errMsg := m.withTunnel(spoofer.Options{}, proto)
+		if errMsg != "" {
+			m.lastMsg, m.lastOK = errMsg, false
+			return m, nil
+		}
+		return m.openConfirm("Start tunnel", opts, prof), nil
+	case stopTunnelMsg:
+		m.flow.kind = ovRunning
+		m.flow.title = "Stopping tunnel"
+		return m, tea.Batch(m.flow.spin.Tick, runRestoreCmd("Stop tunnel", spoofer.Options{}))
 
 	// Route netrecon probe messages to dashboard.
 	case netProbeResult, netProbeTick:
@@ -226,17 +282,19 @@ func (m mainModel) View() string {
 	b.WriteString(m.renderTabBar())
 	b.WriteString("\n\n")
 
-	// ── Tab content ──
-	switch m.activeTab {
-	case tabDashboard:
+	// ── Tab content (a modal replaces it while open) ──
+	switch {
+	case m.flow.kind != ovNone:
+		b.WriteString(m.viewOverlay(contentWidth))
+	case m.activeTab == tabDashboard:
 		b.WriteString(m.dashboard.View(contentWidth))
-	case tabIdentity:
+	case m.activeTab == tabIdentity:
 		b.WriteString(m.identity.View(contentWidth))
-	case tabTunnel:
+	case m.activeTab == tabTunnel:
 		b.WriteString(m.tunnel.View(contentWidth))
-	case tabTraffic:
+	case m.activeTab == tabTraffic:
 		b.WriteString(m.traffic.View(contentWidth))
-	case tabStatus:
+	case m.activeTab == tabStatus:
 		b.WriteString(m.status.View(contentWidth))
 	}
 
@@ -258,6 +316,50 @@ func (m mainModel) View() string {
 	b.WriteString("\n")
 
 	return b.String()
+}
+
+// enterTab runs whenever the active tab changes: it restarts a frozen
+// spinner and starts the live-tunnel refresh loop on the Tunnel tab.
+func (m *mainModel) enterTab() tea.Cmd {
+	cmds := []tea.Cmd{m.restartSpinnerIfNeeded()}
+	if m.activeTab == tabTunnel && !m.liveLoop {
+		m.liveLoop = true
+		cmds = append(cmds, fetchLiveCmd(), liveTickCmd())
+	}
+	return tea.Batch(cmds...)
+}
+
+// withTunnel adds the tunnel (and its profile) to opts, or explains why not.
+func (m mainModel) withTunnel(opts spoofer.Options, proto string) (spoofer.Options, *profile.Profile, string) {
+	prof := m.tunnel.pickedProfile(proto)
+	if needsConfig(proto) && prof == nil {
+		return opts, nil, proto + " needs a profile: open the Tunnel tab (3) and press n"
+	}
+	opts.Tunnel = proto
+	opts.TunnelMode = m.tunnel.modeFor(proto)
+	if prof != nil {
+		opts.TunnelCfg = prof.ConfigPath
+	}
+	return opts, prof, ""
+}
+
+// beginApply builds the options from the tabs and opens the preview.
+func (m mainModel) beginApply() (tea.Model, tea.Cmd) {
+	opts := m.identity.buildOpts()
+	var prof *profile.Profile
+	if proto := m.tunnel.selectedTunnel(); proto != "" {
+		var errMsg string
+		opts, prof, errMsg = m.withTunnel(opts, proto)
+		if errMsg != "" {
+			m.lastMsg, m.lastOK = errMsg, false
+			return m, nil
+		}
+	}
+	if !opts.MAC && !opts.NetIdent && !opts.SysInfo && opts.Tunnel == "" {
+		m.lastMsg, m.lastOK = "Nothing selected \u2014 tick at least one operation or pick a tunnel.", false
+		return m, nil
+	}
+	return m.openConfirm("Apply", opts, prof), nil
 }
 
 // restartSpinnerIfNeeded re-kicks the spinner tick loop when switching to a
@@ -306,6 +408,7 @@ func (m mainModel) renderHelpBar() string {
 		{"A", "Apply"},
 		{"R", "Restore"},
 		{"S", "Scan"},
+		{"L", "Last result"},
 		{"Tab", "Switch"},
 		{"1-5", "Jump"},
 		{"\u2191\u2193/jk", "Nav"},
@@ -341,7 +444,7 @@ func summariseResults(results []spoofer.Result) (msg string, ok bool) {
 			parts = append(parts, fmt.Sprintf("%s: %v", r.Operation, r.Err))
 			allOK = false
 		} else {
-			parts = append(parts, r.Operation+": "+r.Details)
+			parts = append(parts, r.Operation+": "+strings.Join(strings.Fields(r.Details), " "))
 		}
 	}
 	return strings.Join(parts, " | "), allOK

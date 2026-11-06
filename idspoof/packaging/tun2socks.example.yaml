@@ -8,7 +8,7 @@
 # receives on the TUN device. socks5/http/ss/ssh schemes are supported.
 # This is NOT your VPN — it's whatever SOCKS/HTTP proxy you want raw,
 # kernel-blocked traffic (nmap -O, custom frames) routed through.
-proxy: socks5://127.0.0.1:1080
+proxy: socks5://127.0.0.1:10880
 
 # TUN device name. Created if it doesn't exist.
 device: tun2socks0

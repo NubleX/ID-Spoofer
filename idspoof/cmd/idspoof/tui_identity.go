@@ -41,11 +41,16 @@ var identityItems = []checkItem{
 
 	// ── Network Persona (radio) ──
 	{
+		label: "None (leave TCP/IP stack alone)", opKey: "persona-none", group: "persona",
+		descTitle: "No Network Persona",
+		separator: true, section: "Network Persona",
+		description: "Do not change the TCP/IP fingerprint.\n\nNo sysctl writes, no iptables chain,\nno NFQUEUE rewriter, no DHCP changes.\n\nPick this to change only the MAC\naddress, the system profile or the\ntunnel.",
+		checked: true,
+	},
+	{
 		label: "Windows 10/11", opKey: "persona-windows", group: "persona",
 		descTitle: "Windows 10/11 Persona",
-		separator: true, section: "Network Persona",
 		description: "Projects a Windows 10/11 TCP/IP identity\nat the wire level. Five layers activate:\n\n\u2022 sysctl: TTL=128, timestamps=0,\n  wscale=8, SACK=1, ECN=0\n\u2022 iptables IDSPOOF_NETEMU chain:\n  MSS clamped to 1460 on SYN packets\n\u2022 NFQUEUE queue 42: rewrites IP ID\n  and TCP options to Windows layout\n\u2022 DHCP: Windows hostname + vendor\n  class \"MSFT 5.0\" (Option 60)\n\u2022 mDNS: Avahi stopped\n\np0f: *:128:0:*:65535,8:mss,nop,ws,\n     nop,nop,sok:df,id+:0",
-		checked: true,
 	},
 	{
 		label: "macOS (Sonoma+)", opKey: "persona-macos", group: "persona",
@@ -66,6 +71,15 @@ var identityItems = []checkItem{
 		label: "Android 12+ (Phone/Tablet)", opKey: "persona-android", group: "persona",
 		descTitle: "Android Persona",
 		description: "Projects an Android 12+ network\nidentity at the wire level.\n\nAndroid uses the Linux kernel so\nTCP options order is identical, but\nparameters differ:\n\n\u2022 sysctl: TTL=64, timestamps=1,\n  wscale=8, ECN=0 (ROM default)\n\u2022 NFQUEUE: MSS,SACK,TS,NOP,WScale\n  (Linux kernel order)\n\u2022 DHCP: android-XXXXXXXXXXXXXXXX\n  style hostname\n\u2022 mDNS: left running\n\np0f: *:64:0:*:65535,8:mss,sackOK,\n     ts,nop,ws:df,id+:0",
+	},
+
+	// ── Safety ──
+	{
+		label: "Auto-revert guard (30 s)", opKey: "guard",
+		descTitle: "Auto-revert Guard",
+		separator: true, section: "Safety",
+		description: "After a change that can affect your\nconnection (MAC, persona, tunnel), a\n30 second countdown starts.\n\nPress Y to keep the change. If you\ndo nothing, or press N, everything is\nrestored automatically.\n\nTurn this off only if you can recover\nthe network some other way.",
+		checked: true,
 	},
 }
 
@@ -178,6 +192,16 @@ func (m identityModel) renderIndicator(i int, it checkItem) (string, lipgloss.St
 	}
 
 	return ind, labelSt
+}
+
+// guardEnabled reports whether the auto-revert guard checkbox is ticked.
+func (m identityModel) guardEnabled() bool {
+	for _, it := range m.items {
+		if it.opKey == "guard" {
+			return it.checked
+		}
+	}
+	return false
 }
 
 // buildOpts maps checked items to spoofer.Options.

@@ -3,6 +3,7 @@ package spoofer
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 
 	"github.com/NubleX/ID-Spoofer/idspoof/internal/hostname"
@@ -69,9 +70,39 @@ func (o *Orchestrator) Restore(opts Options) []Result {
 	if opts.NetIdent {
 		results = append(results, o.restoreNetIdent(opts.Quiet))
 	}
-	// Always try to stop any active tunnel on restore.
-	results = append(results, o.restoreTunnel(opts.Quiet))
+	// Stop any active tunnel on restore unless the caller scoped it out.
+	if !opts.SkipTunnel {
+		results = append(results, o.restoreTunnel(opts.Quiet))
+	}
 	return results
+}
+
+// MACTargets lists the interfaces the MAC spoofer would change, sorted.
+func (o *Orchestrator) MACTargets() []string {
+	ifaces, err := o.plat.MACSpoofer().ListInterfaces()
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(ifaces))
+	for _, i := range ifaces {
+		names = append(names, i.Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// TunnelStatus reports the running tunnel, including one started by an
+// earlier idspoof invocation (tun2socks tracks itself by pidfile).
+func (o *Orchestrator) TunnelStatus() tunnel.Status {
+	if st := o.tunnelM.CurrentStatus(); st.Running {
+		return st
+	}
+	if proto, _ := o.state.Get("TUNNEL_PROTOCOL"); proto == "tun2socks" {
+		if t := tunnel.Get(proto); t != nil {
+			return t.Status()
+		}
+	}
+	return tunnel.Status{Protocol: "none"}
 }
 
 // --- MAC ---
@@ -88,18 +119,20 @@ func (o *Orchestrator) applyMAC(dry, quiet bool) Result {
 		ui.Progress("Discovering network interfaces...", 10)
 	}
 
-	// Save originals to state before changing.
-	origState := mac.InterfacesToStateString(ifaces)
-	if err := o.state.Set("ORIG_MACS", origState); err != nil {
-		o.logger.Warn("could not persist original MACs", "err", err)
-	}
-
+	// A dry run must not touch state: overwriting ORIG_MACS while the MACs
+	// are already spoofed would destroy the restore baseline.
 	if dry {
 		details := "would change MACs for:"
 		for _, i := range ifaces {
 			details += fmt.Sprintf("\n  %s (%s)", i.Name, i.MAC)
 		}
 		return Result{Operation: OpMAC, Success: true, Details: details}
+	}
+
+	// Save originals to state before changing.
+	origState := mac.InterfacesToStateString(ifaces)
+	if err := o.state.Set("ORIG_MACS", origState); err != nil {
+		o.logger.Warn("could not persist original MACs", "err", err)
 	}
 
 	if !quiet {

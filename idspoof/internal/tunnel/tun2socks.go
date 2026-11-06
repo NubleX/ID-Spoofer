@@ -52,6 +52,41 @@ func tun2socksLogfile() string {
 	return filepath.Join(config.DefaultStateDir, "tun2socks.log")
 }
 
+// LogTail returns up to n trailing lines of the named tunnel's log file, or
+// nil if that tunnel writes none or the file cannot be read. Only the last
+// 64 KiB are read so a long-lived log stays cheap.
+func LogTail(proto string, n int) []string {
+	if proto != "tun2socks" || n <= 0 {
+		return nil
+	}
+	f, err := os.Open(tun2socksLogfile())
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil
+	}
+	const window = 64 << 10
+	off := int64(0)
+	if fi.Size() > window {
+		off = fi.Size() - window
+	}
+	buf := make([]byte, fi.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && len(buf) > 0 {
+		return nil
+	}
+	lines := strings.Split(strings.TrimRight(string(buf), "\n"), "\n")
+	if off > 0 && len(lines) > 0 {
+		lines = lines[1:] // first line is likely cut mid-way
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines
+}
+
 // ParseTun2socksConfig loads a YAML file into an engine.Key, applying the
 // same defaults the CLI's --tunnel-config flag documents. Exported so the
 // hidden `__tun2socks-run` helper command parses the file identically to

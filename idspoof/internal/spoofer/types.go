@@ -29,6 +29,8 @@ type Options struct {
 	TunnelCfg   string // path to tunnel config file
 	DryRun      bool
 	Quiet       bool
+	// SkipTunnel makes Restore leave a running tunnel alone (scoped restore).
+	SkipTunnel bool
 }
 
 // AllOps returns an Options that enables every operation (except tunnel).
