@@ -339,6 +339,19 @@ func (o *Orchestrator) applyTunnel(opts Options) Result {
 func (o *Orchestrator) restoreTunnel(quiet bool) Result {
 	st := o.tunnelM.CurrentStatus()
 	if !st.Running {
+		// A separate `restore` invocation has no in-memory tunnel. tun2socks
+		// tracks its detached helper by pidfile, so stop it from the saved
+		// protocol name instead of reporting "no active tunnel".
+		if proto, _ := o.state.Get("TUNNEL_PROTOCOL"); proto == "tun2socks" {
+			if t := tunnel.Get(proto); t != nil && t.Status().Running {
+				if err := t.Stop(); err != nil {
+					return Result{Operation: OpTunnel, Err: err}
+				}
+				o.state.Set("TUNNEL_PROTOCOL", "")
+				o.state.Set("TUNNEL_MODE", "")
+				return Result{Operation: OpTunnel, Success: true, Details: "tun2socks stopped"}
+			}
+		}
 		return Result{Operation: OpTunnel, Success: true, Details: "no active tunnel"}
 	}
 

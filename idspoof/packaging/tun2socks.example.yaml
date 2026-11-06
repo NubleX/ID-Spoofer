@@ -38,9 +38,16 @@ fwmark: 0x2323
 # user's traffic into its own routing table — this does NOT touch the
 # system default route, Mullvad keeps working normally for everything
 # else:
+#
+# The engine does NOT run this through a shell: it splits the string and
+# execs the first word directly, so `&&` and redirects only work inside an
+# explicit `sh -c '...'`. The engine also does not address or raise the
+# device, so the first two steps below are required.
 tun-post-up: >-
+  sh -c 'ip addr add 198.18.0.1/15 dev tun2socks0 &&
+  ip link set tun2socks0 up &&
   ip route add default dev tun2socks0 table 100 &&
   iptables -t mangle -A OUTPUT -m owner --uid-owner pivot -j MARK --set-mark 0x2324 &&
-  ip rule add fwmark 0x2324 table 100
+  ip rule add fwmark 0x2324 table 100'
 
 loglevel: warning
