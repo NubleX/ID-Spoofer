@@ -80,6 +80,7 @@ var Registry = map[string]func() Tunnel{
 	"quic":         func() Tunnel { return &quicTunnel{} },
 	"tor-over-vpn": func() Tunnel { return &torOverVPN{} },
 	"vpn-over-tor": func() Tunnel { return &vpnOverTor{} },
+	"tun2socks":    func() Tunnel { return &tun2socksTunnel{} },
 }
 
 // Get returns a tunnel instance by protocol name, or nil if unknown.

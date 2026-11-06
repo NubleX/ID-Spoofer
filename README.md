@@ -1,10 +1,10 @@
 <div align="center">
   <img src="assets/images/logo.png" alt="ID-Spoofer Logo" width="400"/>
 
-# ID-Spoofer v2.0.7
+# ID-Spoofer v2.0.8
 
 ![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
-![Version](https://img.shields.io/badge/version-2.0.7-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.8-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
 ![Language](https://img.shields.io/badge/language-Go-00ADD8.svg)
 ![Status](https://img.shields.io/badge/status-active-brightgreen.svg)
@@ -12,7 +12,7 @@
 
 </div>
 
-A cross-platform identity spoofing toolkit for penetration testing and security assessments. Written in Go, ID-Spoofer randomizes MAC addresses and projects a convincing OS network persona (Windows, macOS, or iOS) at the wire level — without touching the system hostname or breaking internal configuration. Optional protocol encapsulation routes traffic through Tor, WireGuard, I2P, Shadowsocks, QUIC tunnels, or layered combinations.
+A cross-platform identity spoofing toolkit for penetration testing and security assessments. Written in Go, ID-Spoofer randomizes MAC addresses and projects a convincing OS network persona (Windows, macOS, or iOS) at the wire level — without touching the system hostname or breaking internal configuration. Optional protocol encapsulation routes traffic through Tor, WireGuard, I2P, Shadowsocks, QUIC tunnels, an embedded tun2socks pivot for raw-socket tools, or layered combinations.
 
 ## Demo
 
@@ -246,7 +246,7 @@ cmd/idspoof/          CLI commands (cobra): apply, restore, status, menu, versio
 internal/
   mac/                MAC generation and Linux interface manipulation
   netident/           Multi-OS network persona: sysctl, iptables, NFQUEUE, DHCP, mDNS
-  tunnel/             Protocol encapsulation: Tor, WireGuard, I2P, Shadowsocks, QUIC, combos
+  tunnel/             Protocol encapsulation: Tor, WireGuard, I2P, Shadowsocks, QUIC, tun2socks, combos
   spoofer/            Orchestrator: runs selected operations, collects results
   state/              Atomic key=value state file (bash v1 compatible)
   platform/           Platform abstraction + privilege checks

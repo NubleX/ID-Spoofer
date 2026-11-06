@@ -45,7 +45,7 @@ func init() {
 	f.BoolVar(&applyOpts.sysinfo, "sysinfo", false, "Generate fake system hardware profile")
 	f.BoolVar(&applyOpts.dryRun, "dry-run", false, "Show what would change without applying")
 	f.StringVar(&applyOpts.persona, "persona", "windows", "Network persona to project (windows, macos, ios, linux, android)")
-	f.StringVar(&applyOpts.tunnel, "tunnel", "", "Traffic encapsulation protocol (tor, wireguard, i2p, shadowsocks, quic, lwo, tor-over-vpn, vpn-over-tor)")
+	f.StringVar(&applyOpts.tunnel, "tunnel", "", "Traffic encapsulation protocol (tor, wireguard, i2p, shadowsocks, quic, lwo, tor-over-vpn, vpn-over-tor, tun2socks)")
 	f.StringVar(&applyOpts.tunnelMode, "tunnel-mode", "transparent", "Tunnel routing mode (transparent, socks)")
 	f.StringVar(&applyOpts.tunnelConfig, "tunnel-config", "", "Path to tunnel config file (WireGuard conf, Shadowsocks json, etc.)")
 }

@@ -58,6 +58,11 @@ var tunnelItems = []checkItem{
 		descTitle: "VPN over Tor",
 		description: "Tor first, then VPN through Tor.\n\nISP sees: Tor traffic only\nTor exit sees: VPN handshake\nVPN server never learns real IP\n\nRequires: tor + wg-quick",
 	},
+	{
+		label: "tun2socks (embedded)", opKey: "tunnel-tun2socks", group: "tunnel",
+		descTitle: "tun2socks — raw packet pivot",
+		description: "Embeds the tun2socks Go engine directly\n(no external process, no setcap dance).\n\n• Creates a TUN device, bridges it to a\n  SOCKS5/HTTP/Shadowsocks/SSH proxy\n• Lets nmap and other raw-socket tools\n  through a proxy the kernel would\n  otherwise refuse (crafted/raw packets)\n• One code path for tun0 (Linux), utun\n  (macOS), wintun (Windows)\n\nRequires: --tunnel-config YAML\n(proxy, device, mtu, fwmark, tun-post-up)",
+	},
 }
 
 type tunnelModel struct {

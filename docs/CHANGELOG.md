@@ -5,6 +5,18 @@ All notable changes to the ID-Spoofer project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.8] - 2026-10-31
+
+### Added
+
+- **tun2socks tunnel** (`internal/tunnel/tun2socks.go`) — embeds the [tun2socks](https://github.com/xjasonlyu/tun2socks) Go engine directly instead of shelling out to an external binary. Bridges a TUN device to a SOCKS5/HTTP/Shadowsocks/SSH proxy so raw-socket tools (`nmap -O`, custom frame crafting) get through a proxy without the kernel's normal socket-layer restrictions in the way. Addresses #28 and #30
+- Hidden `idspoof __tun2socks-run` helper command: the engine's own detached process, re-exec'd from `apply` so it survives the CLI invocation that started it — tracked by a pidfile so `restore` works from a separate later invocation, not just within the same process
+- `packaging/` — systemd unit (`idspoof-tun2socks.service`) and example YAML config for persisting the tunnel across reboot
+
+### Changed
+
+- `--tunnel` flag now accepts `tun2socks` alongside the existing eight protocols; wired into the TUI tunnel picker
+
 ## [2.0.6] - 2026-10-16
 
 ### Fixed

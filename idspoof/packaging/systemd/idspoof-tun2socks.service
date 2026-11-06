@@ -1,0 +1,36 @@
+[Unit]
+Description=idspoof tun2socks pivot (embedded tun2socks TUN device bridged to a SOCKS/HTTP proxy)
+Documentation=https://github.com/NubleX/ID-Spoofer
+After=network-online.target
+Wants=network-online.target
+# If the proxy in tun2socks.yaml is provided by another unit on this box
+# (ssh -D as a service, Tor, a VPN client's local SOCKS listener), start
+# after it so the engine isn't dialing a proxy that doesn't exist yet:
+# After=tor.service
+# Requires=tor.service
+
+[Service]
+# `idspoof apply` validates the config, spawns the detached engine helper
+# (`idspoof __tun2socks-run`, its own session via setsid) with a pidfile at
+# /var/log/idspoof/tun2socks.pid, confirms it's alive, then exits — that's
+# the fork systemd is watching for.
+Type=forking
+PIDFile=/var/log/idspoof/tun2socks.pid
+ExecStart=/usr/local/bin/idspoof apply --tunnel tun2socks --tunnel-config /etc/idspoof/tun2socks.yaml --quiet
+ExecStop=/usr/local/bin/idspoof restore --quiet
+Restart=on-failure
+RestartSec=5
+
+# idspoof needs root: TUN device creation, MAC changes, iptables, NFQUEUE.
+User=root
+
+# The default `apply` call above also re-randomises MAC addresses and
+# reapplies the network persona on every start/restart, same as running
+# `idspoof apply` with no flags — that's intentional (full identity reset
+# alongside the tunnel), not a side effect of this unit. To start ONLY the
+# tunnel without touching MAC/persona, change ExecStart to add an explicit
+# op flag, e.g. `--netident --tunnel tun2socks ...` (any one of
+# --mac/--netident/--sysinfo narrows apply to just the flags you list).
+
+[Install]
+WantedBy=multi-user.target

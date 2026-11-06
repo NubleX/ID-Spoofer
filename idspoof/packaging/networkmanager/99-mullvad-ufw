@@ -1,0 +1,63 @@
+#!/bin/bash
+# NetworkManager dispatcher: keeps a ufw allow rule in sync with whatever
+# Mullvad WireGuard peer is currently active.
+#
+# `ufw default deny outgoing` only lets NEW outbound connections through
+# rules that explicitly match them. Mullvad's port/server changes every
+# time you switch locations or bridge mode, so a static `ufw allow out
+# port X` rule goes stale constantly. This reads the live peer endpoint
+# from `wg show` on every NetworkManager up/down event and replaces the
+# allow rule to match — it only ever touches the one rule it tagged with
+# its own comment, never anything else in your ruleset.
+#
+# Install:
+#   sudo install -m 755 -o root -g root \
+#     packaging/networkmanager/99-mullvad-ufw \
+#     /etc/NetworkManager/dispatcher.d/99-mullvad-ufw
+#
+# NetworkManager runs dispatcher.d scripts as root automatically; nothing
+# else to enable.
+
+set -euo pipefail
+
+IFACE="$1"
+ACTION="$2"
+TAG="mullvad-dynamic"
+
+remove_tagged_rule() {
+    # ufw has no "delete by comment" verb; find the rule number by its
+    # tag and delete it. Loops in case more than one ever accumulated.
+    # ufw pads single-digit numbers ("[ 1]"), hence the \s*. The trailing
+    # `|| true` keeps `set -e`/pipefail from killing the script when no
+    # tagged rule exists (grep exits 1), which is the normal first-run case.
+    while true; do
+        num=$(ufw status numbered 2>/dev/null | grep -F "# $TAG" | head -1 | grep -oP '^\[\s*\K[0-9]+' || true)
+        [ -z "$num" ] && break
+        ufw --force delete "$num" >/dev/null 2>&1 || break
+    done
+}
+
+# Only act on interfaces that are actually a live WireGuard device —
+# don't hardcode a connection name, Mullvad's app/NM profile can rename it.
+is_wireguard_iface() {
+    wg show "$1" >/dev/null 2>&1
+}
+
+case "$ACTION" in
+    up)
+        is_wireguard_iface "$IFACE" || exit 0
+        remove_tagged_rule
+
+        endpoint=$(wg show "$IFACE" endpoints 2>/dev/null | awk '{print $2}')
+        [ -z "$endpoint" ] && exit 0
+
+        peer_ip="${endpoint%:*}"
+        peer_port="${endpoint##*:}"
+        [ -z "$peer_ip" ] || [ -z "$peer_port" ] && exit 0
+
+        ufw allow out to "$peer_ip" port "$peer_port" proto udp comment "$TAG"
+        ;;
+    down|vpn-down|pre-down)
+        remove_tagged_rule
+        ;;
+esac
