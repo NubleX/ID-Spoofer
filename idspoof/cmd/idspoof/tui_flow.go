@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +30,8 @@ const (
 	ovRestore
 	ovForm
 	ovPaste
+	ovPreset
+	ovGen
 )
 
 // flowModel is the modal layer drawn over the tabs: previews, progress,
@@ -52,12 +53,27 @@ type flowModel struct {
 	lastOK    bool
 
 	// profile form / paste box.
-	inputs  []lineInput
-	labels  []string
-	focus   int
-	area    pasteBox
-	formErr string
-	tunnel  string
+	inputs []lineInput
+	labels []string
+	focus  int
+	area   pasteBox
+
+	// preset picker and the preset behind the open form.
+	presets []profile.Preset
+	pcursor int
+	preset  profile.Preset
+
+	// per-input generator names and field keys (parallel to inputs), the
+	// reveal-secrets toggle and an info line (e.g. the new public key).
+	gens   []string
+	keys   []string
+	reveal bool
+	note   string
+
+	// generator overlay contents.
+	genLines []string
+	formErr  string
+	tunnel   string
 }
 
 func newFlowModel() flowModel {
@@ -294,6 +310,30 @@ func (m mainModel) updateOverlay(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.flow.kind = ovRunning
 		m.flow.title = "Restoring"
 		return m, tea.Batch(m.flow.spin.Tick, runRestoreCmd("Restore", opts))
+	case ovGen:
+		switch k {
+		case "enter", "r", "R":
+			return m.openGen(), nil
+		case "esc":
+			m.flow.kind = ovNone
+		}
+	case ovPreset:
+		switch k {
+		case "up", "k":
+			if m.flow.pcursor > 0 {
+				m.flow.pcursor--
+			}
+		case "down", "j":
+			if m.flow.pcursor < len(m.flow.presets)-1 {
+				m.flow.pcursor++
+			}
+		case "enter":
+			return m.openForm(m.flow.presets[m.flow.pcursor]), nil
+		case "p", "P":
+			return m.openPaste(m.flow.tunnel), nil
+		case "esc":
+			m.flow.kind = ovNone
+		}
 	case ovForm, ovPaste:
 		return m.updateForm(msg)
 	}
@@ -346,20 +386,46 @@ func newInput(placeholder, value string, width int) lineInput {
 	return lineInput{text: value, placeholder: placeholder, width: width}
 }
 
-func (m mainModel) openForm(proto string) mainModel {
+// openPresets shows the preset picker for a tunnel.
+func (m mainModel) openPresets(proto string) mainModel {
+	m.flow.presets = profile.PresetsFor(proto)
+	if len(m.flow.presets) == 0 {
+		m.tunnel.say(false, proto+" needs no config. Press p to paste one anyway.")
+		return m
+	}
 	m.flow.tunnel = proto
+	m.flow.pcursor = 0
+	m.flow.kind = ovPreset
+	m.flow.title = "New " + proto + " profile: choose a preset"
+	return m
+}
+
+// openForm opens the field form for a preset.
+func (m mainModel) openForm(p profile.Preset) mainModel {
+	m.flow.preset = p
 	m.flow.formErr = ""
 	m.flow.focus = 0
 	m.flow.kind = ovForm
-	m.flow.title = "New tun2socks profile"
-	m.flow.labels = []string{"Name", "Proxy URL", "TUN device", "MTU", "Fwmark (hex)", "Pivot user (optional)"}
-	m.flow.inputs = []lineInput{
-		newInput("lab", "", 40),
-		newInput("socks5://127.0.0.1:1080", "", 40),
-		newInput("tun2socks0", "", 40),
-		newInput("1500", "", 40),
-		newInput("0x2323", "", 40),
-		newInput("empty = do not route any user into the TUN", "", 40),
+	m.flow.title = p.Title
+	m.flow.labels = []string{"Profile name"}
+	m.flow.inputs = []lineInput{newInput(p.ID+" (default)", "", 48)}
+	m.flow.gens = []string{"name"}
+	m.flow.keys = []string{"name"}
+	m.flow.reveal, m.flow.note = false, ""
+	for _, f := range p.Fields {
+		m.flow.gens = append(m.flow.gens, f.Gen)
+		m.flow.keys = append(m.flow.keys, f.Key)
+		hint := "(required)"
+		switch {
+		case f.Default != "":
+			hint = f.Default + " (default)"
+		case f.Optional:
+			hint = "(optional)"
+		}
+		in := newInput(hint, "", 48)
+		in.secret = f.Secret
+		m.flow.labels = append(m.flow.labels, f.Label)
+		m.flow.inputs = append(m.flow.inputs, in)
 	}
 	m.flow.inputs[0].focused = true
 	return m
@@ -372,7 +438,10 @@ func (m mainModel) openPaste(proto string) mainModel {
 	m.flow.kind = ovPaste
 	m.flow.title = "Paste " + proto + " config"
 	m.flow.labels = []string{"Name"}
-	m.flow.inputs = []lineInput{newInput("lab", "", 40)}
+	m.flow.inputs = []lineInput{newInput("lab", "", 48)}
+	m.flow.gens = []string{"name"}
+	m.flow.keys = []string{"name"}
+	m.flow.reveal, m.flow.note = false, ""
 	m.flow.inputs[0].focused = true
 	m.flow.area = pasteBox{}
 	return m
@@ -398,6 +467,50 @@ func (m *flowModel) setFocus(i int) {
 	}
 }
 
+// valueOf returns the current text of the input with the given key, or the
+// preset default when it is empty.
+func (m *flowModel) valueOf(key string) string {
+	for i, k := range m.keys {
+		if k == key && m.inputs[i].text != "" {
+			return m.inputs[i].text
+		}
+	}
+	for _, f := range m.preset.Fields {
+		if f.Key == key {
+			return f.Default
+		}
+	}
+	return ""
+}
+
+// generate fills input i with a fresh throwaway value for its generator.
+func (m *flowModel) generate(i int) {
+	var v string
+	var err error
+	switch m.gens[i] {
+	case "name":
+		v = profile.RandomName("tmp")
+	case "wgkey":
+		var pub string
+		v, pub, err = profile.NewWGKeypair()
+		if err == nil {
+			m.note = "new WireGuard public key (give this to the peer): " + pub
+		}
+	case "sskey":
+		v, err = profile.RandomSSKey(m.valueOf("method"))
+	case "password":
+		v, err = profile.RandomPassword(24)
+	default:
+		return
+	}
+	if err != nil {
+		m.formErr = "generate failed: " + err.Error()
+		return
+	}
+	m.inputs[i].text = v
+	m.formErr = ""
+}
+
 func (m mainModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
 	if k != "ctrl+s" {
@@ -413,6 +526,21 @@ func (m mainModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+s":
 		return m.submitForm()
+	case "ctrl+g":
+		if m.flow.focus < len(m.flow.inputs) {
+			m.flow.generate(m.flow.focus)
+		}
+		return m, nil
+	case "ctrl+r":
+		for i := range m.flow.inputs {
+			if m.flow.gens[i] != "" {
+				m.flow.generate(i)
+			}
+		}
+		return m, nil
+	case "ctrl+t":
+		m.flow.reveal = !m.flow.reveal
+		return m, nil
 	case "tab", "down":
 		if !(m.flow.kind == ovPaste && m.flow.focus == last && k == "down") {
 			m.flow.setFocus(m.flow.focus + 1)
@@ -446,25 +574,23 @@ func (m mainModel) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m mainModel) submitForm() (tea.Model, tea.Cmd) {
 	name := strings.TrimSpace(m.flow.inputs[0].Value())
+	if name == "" && m.flow.kind == ovForm {
+		name = m.flow.preset.ID
+	}
+	for _, ex := range m.tunnel.profiles {
+		if ex.Name == name {
+			m.flow.formErr = "profile " + name + " already exists: pick another name or delete it first"
+			return m, nil
+		}
+	}
 	var body string
 	if m.flow.kind == ovForm {
-		mtu := 0
-		if s := strings.TrimSpace(m.flow.inputs[3].Value()); s != "" {
-			v, err := strconv.Atoi(s)
-			if err != nil {
-				m.flow.formErr = "MTU must be a number"
-				return m, nil
-			}
-			mtu = v
+		vals := map[string]string{}
+		for i, f := range m.flow.preset.Fields {
+			vals[f.Key] = m.flow.inputs[i+1].Value()
 		}
 		var err error
-		body, err = profile.RenderTun2socks(profile.Tun2socksForm{
-			Proxy:     m.flow.inputs[1].Value(),
-			Device:    strings.TrimSpace(m.flow.inputs[2].Value()),
-			MTU:       mtu,
-			Mark:      strings.TrimSpace(m.flow.inputs[4].Value()),
-			PivotUser: strings.TrimSpace(m.flow.inputs[5].Value()),
-		})
+		body, err = m.flow.preset.Render(vals)
 		if err != nil {
 			m.flow.formErr = err.Error()
 			return m, nil
@@ -486,6 +612,28 @@ func (m mainModel) submitForm() (tea.Model, tea.Cmd) {
 	m.tunnel.say(true, "saved profile "+p.Name)
 	m.flow.kind = ovNone
 	return m, nil
+}
+
+// openGen fills the generator overlay with fresh credentials.
+func (m mainModel) openGen() mainModel {
+	var l []string
+	priv, pub, err := profile.NewWGKeypair()
+	if err != nil {
+		l = append(l, "[FAIL] WireGuard keypair: "+err.Error())
+	} else {
+		l = append(l, "WireGuard private key (keep secret):", "  "+priv, "WireGuard public key (give to the peer):", "  "+pub, "")
+	}
+	pw, _ := profile.RandomPassword(24)
+	k128, _ := profile.RandomSSKey("2022-blake3-aes-128-gcm")
+	k256, _ := profile.RandomSSKey("2022-blake3-aes-256-gcm")
+	l = append(l,
+		"Password (24 chars):", "  "+pw, "",
+		"Shadowsocks 2022 key, aes-128:", "  "+k128, "",
+		"Shadowsocks 2022 key, aes-256 / chacha20:", "  "+k256)
+	m.flow.kind = ovGen
+	m.flow.title = "Throwaway credentials"
+	m.flow.genLines = l
+	return m
 }
 
 // ── Overlay rendering ───────────────────────────────────────────────────────
@@ -561,18 +709,45 @@ func (m mainModel) viewOverlay(width int) string {
 		}
 		b.WriteString("\n" + sCursor.Render("[Esc]") + sHelpBar.Render(" cancel"))
 		return boxStyle(colorCyan, w).Render(b.String())
+	case ovGen:
+		b.WriteString(sPanelTitle.Render(f.title) + "\n\n")
+		for _, l := range f.genLines {
+			if strings.HasPrefix(l, "  ") {
+				b.WriteString(sChecked.Render(l) + "\n")
+			} else {
+				b.WriteString(sTableHeader.Render(l) + "\n")
+			}
+		}
+		b.WriteString("\n" + sTableDim.Render("Shown once and never stored. Select with the mouse to copy; closing discards them.") + "\n")
+		b.WriteString(sCursor.Render("[Enter/R]") + sHelpBar.Render(" regenerate   ") + sCursor.Render("[Esc]") + sHelpBar.Render(" close"))
+		return boxStyle(colorYellow, w).Render(b.String())
+	case ovPreset:
+		b.WriteString(sPanelTitle.Render(f.title) + "\n\n")
+		for i, p := range f.presets {
+			if i == f.pcursor {
+				b.WriteString(sCursor.Render("\u25b8 "+p.Title) + "\n")
+			} else {
+				b.WriteString(sUnchecked.Render("  "+p.Title) + "\n")
+			}
+		}
+		b.WriteString("\n" + sDescBody.Render(f.presets[f.pcursor].Desc) + "\n\n")
+		b.WriteString(sHelpBar.Render("[j/k] move  [Enter] choose  [P] paste a raw config  [Esc] cancel"))
+		return boxStyle(colorCyan, w).Render(b.String())
 	case ovForm, ovPaste:
 		b.WriteString(sPanelTitle.Render(f.title) + "\n\n")
 		for i, in := range f.inputs {
-			b.WriteString(fmt.Sprintf("%-22s %s\n", sTableHeader.Render(f.labels[i]), in.View()))
+			b.WriteString(fmt.Sprintf("%-22s %s\n", sTableHeader.Render(f.labels[i]), in.View(f.reveal)))
 		}
 		if f.kind == ovPaste {
 			b.WriteString("\n" + f.area.View(w-6, 10) + "\n")
 		}
+		if f.note != "" {
+			b.WriteString("\n" + sOK.Render(wrapLines([]string{f.note}, w-6)[0]) + "\n")
+		}
 		if f.formErr != "" {
 			b.WriteString("\n" + sFail.Render("x "+f.formErr) + "\n")
 		}
-		hint := "[Tab] next  [Enter] next/save  [Ctrl+S] save  [Ctrl+U] clear field  [Esc] cancel"
+		hint := "[Tab] next  [Ctrl+G] generate field  [Ctrl+R] generate all  [Ctrl+T] show secrets\n[Enter] next/save  [Ctrl+S] save  [Ctrl+U] clear field  [Esc] cancel"
 		b.WriteString("\n" + sHelpBar.Render(hint))
 		return boxStyle(colorCyan, w).Render(b.String())
 	}
@@ -652,6 +827,7 @@ type lineInput struct {
 	placeholder string
 	width       int
 	focused     bool
+	secret      bool // masked when drawn
 }
 
 func (l lineInput) Value() string { return l.text }
@@ -675,12 +851,19 @@ func (l lineInput) Update(msg tea.KeyMsg) lineInput {
 	return l
 }
 
-func (l lineInput) View() string {
+func (l lineInput) View(reveal bool) string {
 	shown := l.text
+	if l.secret && !reveal {
+		shown = strings.Repeat("*", len([]rune(l.text)))
+	}
+	if shown == "" {
+		if l.focused {
+			return sCursor.Render("_") + " " + sTableDim.Render(truncate(l.placeholder, l.width))
+		}
+		return sTableDim.Render(truncate(l.placeholder, l.width))
+	}
 	if l.focused {
 		shown += "_"
-	} else if shown == "" {
-		return sTableDim.Render(truncate(l.placeholder, l.width))
 	}
 	r := []rune(shown)
 	if len(r) > l.width {

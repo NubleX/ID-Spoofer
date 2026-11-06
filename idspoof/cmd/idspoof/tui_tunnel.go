@@ -89,6 +89,7 @@ type tunnelModel struct {
 type (
 	openFormMsg    struct{ tunnel string }
 	openPasteMsg   struct{ tunnel string }
+	openGenMsg     struct{}
 	startTunnelMsg struct{}
 	stopTunnelMsg  struct{}
 )
@@ -267,6 +268,8 @@ func (m tunnelModel) Update(msg tea.Msg) (tunnelModel, tea.Cmd) {
 			m.delArm = ""
 			m.reload()
 		}
+	case "g":
+		return m, func() tea.Msg { return openGenMsg{} }
 	case "t":
 		m.say(m.testProfile(proto))
 	case "u":
@@ -411,7 +414,7 @@ func (m tunnelModel) profilePanel() string {
 		}
 		b.WriteString(st.Render("  "+m.note) + "\n")
 	}
-	b.WriteString(sTableDim.Render("  [n]ew  [p]aste  [d]elete  [t]est  [m]ode  [u]p start  [x] stop") + "\n")
+	b.WriteString(sTableDim.Render("  [n]ew  [p]aste  [g]enerate keys  [d]elete  [t]est  [m]ode  [u]p  [x] stop") + "\n")
 	return b.String()
 }
 

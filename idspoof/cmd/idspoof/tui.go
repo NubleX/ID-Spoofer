@@ -183,10 +183,9 @@ func (m mainModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(fetchLiveCmd(), liveTickCmd())
 	case openFormMsg:
-		if msg.tunnel == "tun2socks" {
-			return m.openForm(msg.tunnel), nil
-		}
-		return m.openPaste(msg.tunnel), nil
+		return m.openPresets(msg.tunnel), nil
+	case openGenMsg:
+		return m.openGen(), nil
 	case openPasteMsg:
 		return m.openPaste(msg.tunnel), nil
 	case startTunnelMsg:
