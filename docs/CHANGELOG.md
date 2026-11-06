@@ -5,17 +5,34 @@ All notable changes to the ID-Spoofer project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.8] - 2026-10-31
+## [2.0.8] - 2026-11-06
 
 ### Added
 
 - **tun2socks tunnel** (`internal/tunnel/tun2socks.go`) — embeds the [tun2socks](https://github.com/xjasonlyu/tun2socks) Go engine directly instead of shelling out to an external binary. Bridges a TUN device to a SOCKS5/HTTP/Shadowsocks/SSH proxy so raw-socket tools (`nmap -O`, custom frame crafting) get through a proxy without the kernel's normal socket-layer restrictions in the way. Addresses #28 and #30
 - Hidden `idspoof __tun2socks-run` helper command: the engine's own detached process, re-exec'd from `apply` so it survives the CLI invocation that started it — tracked by a pidfile so `restore` works from a separate later invocation, not just within the same process
-- `packaging/` — systemd unit (`idspoof-tun2socks.service`) and example YAML config for persisting the tunnel across reboot
+- **Boot daemon** (`idspoof daemon`, `idspoof.service`) - starts before `network-pre.target` as a `Type=notify` unit, applies the boot profile (MAC, persona, tunnel), supervises the tunnel with exponential-backoff restarts, and restores everything when stopped. Idles with no boot profile. `idspoof.disable=1` on the kernel command line is the recovery switch
+- **TUI-native control** - preview and confirm before every apply, non-blocking apply with a full result log, scoped restore (all, MAC, persona, tunnel), a 30 s auto-revert guard, persona "None", and a live tunnel panel with log tail
+- **Tunnel profiles** - create, test, switch and delete profiles from the Tunnel tab; a catalog of presets (SOCKS5, Mullvad, Tor, SSH, I2P, HTTP, Shadowsocks, WireGuard, sslocal, Hysteria2) with validated forms; paste box for raw configs
+- **Key and password generators** - WireGuard key pairs, Shadowsocks 2022 keys, passwords and throwaway profile names (Ctrl+G, Ctrl+R in forms, `g` on the Tunnel tab)
+- **Boot overlay** (`B`) - save the current selection as the boot profile, restart the service, see its state
+- **Packaging** - `.deb` and `.rpm` packages (daemon, menu entry, icon), release tarball with `install.sh`, `make install` / `make uninstall`
+- `packaging/` - example YAML config for the tun2socks tunnel and an optional NetworkManager dispatcher for Mullvad + `ufw default deny outgoing`
 
 ### Changed
 
 - `--tunnel` flag now accepts `tun2socks` alongside the existing eight protocols; wired into the TUI tunnel picker
+- `make` derives the version from `v*` release tags only (older `idspoof/v*` tags gave a wrong version)
+- The release workflow reads its Go version from `go.mod`
+
+### Fixed
+
+- README screenshots replaced with the current TUI (dashboard, tunnel profiles, status)
+- `idspoof restore` run from a separate invocation now stops a running tun2socks helper (it reported "no active tunnel")
+- `tun-post-up` is exec'd without a shell by the engine; the example now uses `sh -c` and brings the device up
+- Dashboard listening-ports panel showed the peer column instead of the local address
+- "VPN routed" detection now sees VPNs that route through policy rules (Mullvad), not only the main table
+- `apply --dry-run` no longer overwrites the saved original MAC addresses, and re-applying while already spoofed keeps the true originals
 
 ## [2.0.6] - 2026-10-16
 

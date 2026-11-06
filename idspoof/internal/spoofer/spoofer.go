@@ -129,8 +129,10 @@ func (o *Orchestrator) applyMAC(dry, quiet bool) Result {
 		return Result{Operation: OpMAC, Success: true, Details: details}
 	}
 
-	// Save originals to state before changing.
-	origState := mac.InterfacesToStateString(ifaces)
+	// Save originals to state before changing. Keep any already-saved
+	// original: after a daemon restart the live MACs are the spoofed ones.
+	savedStr, _ := o.state.Get("ORIG_MACS")
+	origState := mac.InterfacesToStateString(mac.MergeOriginals(mac.InterfacesFromStateString(savedStr), ifaces))
 	if err := o.state.Set("ORIG_MACS", origState); err != nil {
 		o.logger.Warn("could not persist original MACs", "err", err)
 	}
@@ -171,6 +173,8 @@ func (o *Orchestrator) restoreMAC(quiet bool) Result {
 	if err := ms.Restore(ifaces); err != nil {
 		return Result{Operation: OpMAC, Err: err}
 	}
+	// Restored: drop the baseline so the next apply records fresh originals.
+	o.state.Delete("ORIG_MACS")
 	if !quiet {
 		ui.Progress("MAC addresses restored", 100)
 	}

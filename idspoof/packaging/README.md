@@ -1,46 +1,34 @@
 # Packaging
 
-## tun2socks persistence (systemd)
+## What ships
 
-`idspoof` embeds the [tun2socks](https://github.com/xjasonlyu/tun2socks) Go
-engine directly (`internal/tunnel/tun2socks.go`) instead of shelling out to a
-separate `tun2socks` binary. It solves the same problem as manually running
-`setcap cap_net_admin+ep $(which tun2socks)` and `tun2socks -device tun0
--proxy socks5://...` by hand — but as a supervised tunnel that survives
-reboot, with a clean `restore` path instead of an orphaned process nobody is
-tracking.
+| File | Installed to | Purpose |
+|---|---|---|
+| `systemd/idspoof.service` | `/usr/lib/systemd/system/` (deb/rpm), `/etc/systemd/system/` (install.sh) | Boot daemon, ordered before `network-pre.target` |
+| `idspoof.desktop` | `<prefix>/share/applications/` | Application menu entry (opens the TUI in a terminal via sudo) |
+| `icons/idspoof-{48,256}.png` | `<prefix>/share/icons/hicolor/*/apps/idspoof.png` | Menu icon |
+| `install.sh` | tarball root | Installer / uninstaller for non-deb systems |
+| `scripts/postinstall.sh`, `scripts/preremove.sh` | package scripts | Enable the unit on install, stop it on removal |
+| `tun2socks.example.yaml`, `networkmanager/99-mullvad-ufw` | `share/doc/idspoof/examples/` | Examples |
 
-Install:
+Releases are built by GoReleaser from a `v*` tag (`.goreleaser.yaml`): tarballs
+and zips, a `.deb` and an `.rpm`, and `checksums.txt`. Try it without
+publishing: `make snapshot` (needs goreleaser), output in `dist/`.
 
-```bash
-sudo mkdir -p /etc/idspoof
-sudo cp packaging/tun2socks.example.yaml /etc/idspoof/tun2socks.yaml
-# edit /etc/idspoof/tun2socks.yaml: set `proxy` to your actual SOCKS/HTTP
-# proxy, review the fwmark and tun-post-up routing before enabling
+## The boot daemon
 
-sudo cp packaging/systemd/idspoof-tun2socks.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now idspoof-tun2socks.service
-```
+The unit is `Type=notify` and runs `idspoof daemon`. It sends `READY=1` once the
+boot profile's identity (MAC, persona) is applied, which releases
+`network-pre.target`, so NetworkManager's first DHCP request already carries the
+spoofed identity. The tunnel starts afterwards and is restarted if it dies.
 
-Check it:
-
-```bash
-sudo idspoof status
-sudo journalctl -u idspoof-tun2socks -f
-cat /var/log/idspoof/tun2socks.log
-```
-
-Stop and remove the tunnel (and whatever else `apply` touched — see the
-comment in the unit file if you only want the tunnel):
-
-```bash
-sudo systemctl disable --now idspoof-tun2socks.service
-```
-
-Review `tun-post-up` in the config before enabling on a box with existing
-routing (Mullvad, other VPNs) — it runs arbitrary shell as root right after
-the TUN device comes up.
+- Boot profile: `/etc/idspoof/boot.yaml`, written from the TUI (`B`).
+  Fields: `mac`, `persona`, `sysinfo`, `tunnel`, `profile`, `mode`.
+- Tunnel profiles live in `<state-dir>/profiles` (default `/var/log/idspoof/profiles`).
+- Logs: `journalctl -u idspoof`.
+- Recovery: add `idspoof.disable=1` to the kernel command line; the daemon then
+  idles and applies nothing.
+- `systemctl stop idspoof` restores the original MAC and persona and stops the tunnel.
 
 ## Mullvad + `ufw default deny outgoing`
 

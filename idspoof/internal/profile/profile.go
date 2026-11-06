@@ -54,6 +54,9 @@ func NewStore(dir string) (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
+// NeedsConfig reports whether a tunnel cannot start without a config file.
+func NeedsConfig(tunnelName string) bool { return tunnelName != "tor" && tunnelName != "i2p" }
+
 // ValidName reports whether s is an acceptable profile name.
 func ValidName(s string) bool { return nameRe.MatchString(s) }
 

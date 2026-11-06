@@ -1,6 +1,6 @@
 # ID-Spoofer v3 spec: idspoofd, transport fabric, virtual NICs, TUI control
 
-Status: approved draft. Target: next major line after 2.0.8. Nothing here is implemented.
+Status: approved draft. Shipped in v2.0.8: the tun2socks tunnel (phase 0), TUI parity slice 1, a boot supervisor (`idspoof daemon`, a lite version of phase 1 without IPC), and .deb/.rpm packaging. Not built: the IPC API, virtual NIC management, composition and policy routing, the sing-box compiler, macOS and Windows service hosts.
 
 ## Context
 
@@ -8,7 +8,7 @@ ID-Spoofer today is a one-shot root CLI plus Bubble Tea TUI (`idspoof/cmd/idspoo
 
 Goal: a resident, supervised, OS-agnostic control plane that starts at boot as root, is controlled by the unprivileged user (TUI first), and treats every network path (VPN, proxy, mesh, dVPN, onion, I2P) as a pluggable transport that can be chained, selected, or policy-routed.
 
-Prerequisite: the tun2socks work is uncommitted on `dev.2.0.6` in `/home/muscle/projects/ID-Spoofer`, not in this worktree. It must be committed (after the e2e steps pass) before phase 1 starts. This spec assumes it lands as-is.
+Prerequisite met: the tun2socks work is committed and released in v2.0.8.
 
 ## Answers to the questions asked
 

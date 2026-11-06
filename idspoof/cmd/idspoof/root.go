@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/NubleX/ID-Spoofer/idspoof/internal/boot"
 	"github.com/NubleX/ID-Spoofer/idspoof/internal/config"
 	"github.com/NubleX/ID-Spoofer/idspoof/internal/logging"
 	"github.com/NubleX/ID-Spoofer/idspoof/internal/platform"
@@ -64,12 +65,14 @@ func init() {
 	pf.BoolVar(&cfg.Debug, "debug", false, "Enable debug logging")
 	pf.StringVar(&cfg.LogFile, "log", "", "Path to log file")
 	pf.StringVar(&cfg.StateDir, "state-dir", "", "Override state directory (default: /var/log/idspoof)")
+	pf.StringVar(&bootConfigPath, "boot-config", boot.DefaultPath, "Boot profile read by the daemon and written by the TUI")
 
 	rootCmd.AddCommand(applyCmd)
 	rootCmd.AddCommand(restoreCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(menuCmd)
+	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(versionCmd)
 }
 

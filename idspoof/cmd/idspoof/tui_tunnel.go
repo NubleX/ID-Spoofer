@@ -163,7 +163,7 @@ func (m tunnelModel) pickedProfile(proto string) *profile.Profile {
 }
 
 // needsConfig reports whether a tunnel cannot start without a config file.
-func needsConfig(proto string) bool { return proto != "tor" && proto != "i2p" }
+func needsConfig(proto string) bool { return profile.NeedsConfig(proto) }
 
 // modeFor is the routing mode that will be used for proto.
 func (m tunnelModel) modeFor(proto string) string {
