@@ -1,0 +1,53 @@
+# Example config for `idspoof apply --tunnel tun2socks --tunnel-config <this file>`.
+# Keys match the upstream tun2socks engine.Key YAML tags exactly — this file
+# is handed straight to the embedded engine, nothing idspoof-specific.
+#
+# Copy to /etc/idspoof/tun2socks.yaml and adjust `proxy` for your setup.
+
+# Required: the proxy tun2socks dials out to for every connection it
+# receives on the TUN device. socks5/http/ss/ssh schemes are supported.
+# This is NOT your VPN — it's whatever SOCKS/HTTP proxy you want raw,
+# kernel-blocked traffic (nmap -O, custom frames) routed through.
+proxy: socks5://127.0.0.1:10880
+
+# TUN device name. Created if it doesn't exist.
+device: tun2socks0
+
+mtu: 1500
+
+# Mark packets this process itself originates (the proxy connection) so
+# they don't get captured by your own routing rules back into the TUN
+# device — this is the standard tun2socks routing-loop guard. This mark
+# is NOT what selects which traffic enters the TUN device (see
+# tun-post-up below) — it only prevents the engine's own upstream
+# connection from looping into itself. Pick a fwmark your other
+# iptables/routing rules don't already use.
+fwmark: 0x2323
+
+# Run once the TUN device is up: route ONLY the traffic you actually
+# want pivoted into tun2socks0 — e.g. everything run as a dedicated
+# unprivileged user, so your normal traffic (and Mullvad's own routing,
+# if "Add peer routes" has it owning the default route) is untouched.
+#
+#   sudo useradd -r -s /usr/sbin/nologin pivot
+#   sudo setcap cap_net_raw+ep $(which nmap)
+#
+# Then run scans as: sudo -u pivot nmap ...
+#
+# A SEPARATE mark (0x2324, distinct from fwmark above) selects just that
+# user's traffic into its own routing table — this does NOT touch the
+# system default route, Mullvad keeps working normally for everything
+# else:
+#
+# The engine does NOT run this through a shell: it splits the string and
+# execs the first word directly, so `&&` and redirects only work inside an
+# explicit `sh -c '...'`. The engine also does not address or raise the
+# device, so the first two steps below are required.
+tun-post-up: >-
+  sh -c 'ip addr add 198.18.0.1/15 dev tun2socks0 &&
+  ip link set tun2socks0 up &&
+  ip route add default dev tun2socks0 table 100 &&
+  iptables -t mangle -A OUTPUT -m owner --uid-owner pivot -j MARK --set-mark 0x2324 &&
+  ip rule add fwmark 0x2324 table 100'
+
+loglevel: warning

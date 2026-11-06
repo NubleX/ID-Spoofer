@@ -44,6 +44,7 @@ type RouteInfo struct {
 	Default    string // default gateway IP
 	DefaultDev string // device for default route
 	VPNRouted  bool   // default route goes through a VPN/tunnel device
+	PolicyVPN  bool   // ...via a catch-all policy rule, not the main table
 }
 
 // IfaceTraffic captures byte/packet counters for a single interface.

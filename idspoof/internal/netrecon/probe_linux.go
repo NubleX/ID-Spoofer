@@ -175,18 +175,20 @@ func parseSSLine(line, proto string) ListeningPort {
 	fields := strings.Fields(line)
 	// ss output: Netid State Recv-Q Send-Q Local:Port Peer:Port Process
 	// or:        State Recv-Q Send-Q Local:Port Peer:Port Process
-	var localAddr, procInfo string
-	if len(fields) >= 5 {
-		localAddr = fields[4]
-		if len(fields) >= 7 {
-			procInfo = fields[6]
-		} else if len(fields) >= 6 {
-			procInfo = fields[5]
+	// `ss -tlnp` / `ss -ulnp` (single socket type) omit the Netid column, so
+	// the column count alone cannot tell the two layouts apart: key off the
+	// first field instead.
+	if len(fields) > 0 {
+		switch fields[0] {
+		case "tcp", "udp", "raw", "u_str", "u_dgr", "nl":
+			fields = fields[1:]
 		}
-	} else if len(fields) >= 4 {
+	}
+	var localAddr, procInfo string
+	if len(fields) >= 4 {
 		localAddr = fields[3]
-		if len(fields) >= 5 {
-			procInfo = fields[4]
+		if len(fields) >= 6 {
+			procInfo = fields[5]
 		}
 	}
 	if localAddr == "" {
@@ -261,6 +263,74 @@ func (p *linuxProber) probeRoute(ns *NetworkState) {
 		ns.Route.DefaultDev = r.Dev
 		ns.Route.VPNRouted = isVPNDevice(r.Dev)
 	}
+
+	// VPN apps such as Mullvad leave the main table's default route alone and
+	// steer everything through policy rules instead ("not from all fwmark X
+	// lookup T"), so the main table alone reports "not routed".
+	if !ns.Route.VPNRouted && vpnDefaultViaRules() {
+		ns.Route.VPNRouted = true
+		ns.Route.PolicyVPN = true
+	}
+}
+
+type ipRule struct {
+	Priority int    `json:"priority"`
+	Src      string `json:"src"`
+	// iproute2 prints the negation flag as `"not":null`, so presence of the
+	// key is what matters, not its value.
+	Not    json.RawMessage `json:"not"`
+	Fwmark string          `json:"fwmark"`
+	Table  string          `json:"table"`
+}
+
+func (r ipRule) negated() bool { return len(r.Not) > 0 && string(r.Not) != "false" }
+
+// catchAll reports whether the rule applies to all traffic that is not
+// otherwise marked, which makes its table the effective default.
+func (r ipRule) catchAll() bool {
+	switch r.Table {
+	case "", "local", "main", "default":
+		return false
+	}
+	if r.negated() {
+		return r.Fwmark != ""
+	}
+	return r.Src == "all" && r.Fwmark == "" && r.Priority < 32766
+}
+
+// vpnDefaultViaRules reports whether a catch-all policy rule sends traffic
+// to a routing table whose default route is a VPN/tunnel device. A rule is
+// catch-all if it inverts a fwmark match, or matches every source with no
+// fwmark and sits ahead of the main table. A mark-only rule (such as the
+// tun2socks pivot) is not catch-all and is ignored.
+func vpnDefaultViaRules() bool {
+	out, err := exec.Command("ip", "-j", "rule", "show").Output()
+	if err != nil {
+		return false
+	}
+	var rules []ipRule
+	if json.Unmarshal(out, &rules) != nil {
+		return false
+	}
+	for _, r := range rules {
+		if !r.catchAll() {
+			continue
+		}
+		tout, err := exec.Command("ip", "-j", "route", "show", "table", r.Table, "default").Output()
+		if err != nil {
+			continue
+		}
+		var routes []ipRoute
+		if json.Unmarshal(tout, &routes) != nil {
+			continue
+		}
+		for _, rt := range routes {
+			if isVPNDevice(rt.Dev) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // --- VPN detection ---
@@ -383,7 +453,11 @@ func (p *linuxProber) generateWarnings(ns *NetworkState) {
 		ns.Warnings = append(ns.Warnings,
 			fmt.Sprintf("%s already running (port %s) — starting another instance may fail", t.Protocol, t.Port))
 	}
-	if ns.Route.VPNRouted {
+	switch {
+	case ns.Route.PolicyVPN:
+		ns.Warnings = append(ns.Warnings,
+			fmt.Sprintf("VPN routes traffic through policy rules (main default route is via %s) — netident DHCP changes may not reach the local network", ns.Route.DefaultDev))
+	case ns.Route.VPNRouted:
 		ns.Warnings = append(ns.Warnings,
 			fmt.Sprintf("Default route via %s (VPN/tunnel) — netident DHCP changes may not reach the local network", ns.Route.DefaultDev))
 	}

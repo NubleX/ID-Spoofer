@@ -1,0 +1,27 @@
+[Unit]
+Description=ID-Spoofer daemon (identity and tunnel supervisor)
+Documentation=https://github.com/NubleX/ID-Spoofer
+# Start as early as possible, like the Mullvad daemon: no default
+# dependencies, and hold back the network until the identity is applied, so
+# the very first DHCP request already carries the spoofed MAC and persona.
+DefaultDependencies=no
+After=local-fs.target systemd-udevd.service
+Wants=network-pre.target
+Before=network-pre.target network.target NetworkManager.service systemd-networkd.service
+Before=shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+# The daemon sends READY=1 once the boot profile's identity is applied (or
+# straight away when no boot profile is set), which releases network-pre.target.
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/idspoof daemon
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=60
+TimeoutStopSec=30
+User=root
+
+[Install]
+WantedBy=multi-user.target

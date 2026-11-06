@@ -1,10 +1,10 @@
 <div align="center">
   <img src="assets/images/logo.png" alt="ID-Spoofer Logo" width="400"/>
 
-# ID-Spoofer v2.0.7
+# ID-Spoofer v2.0.8
 
 ![License](https://img.shields.io/badge/license-GPL%20v3-blue.svg)
-![Version](https://img.shields.io/badge/version-2.0.7-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.8-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)
 ![Language](https://img.shields.io/badge/language-Go-00ADD8.svg)
 ![Status](https://img.shields.io/badge/status-active-brightgreen.svg)
@@ -12,7 +12,7 @@
 
 </div>
 
-A cross-platform identity spoofing toolkit for penetration testing and security assessments. Written in Go, ID-Spoofer randomizes MAC addresses and projects a convincing OS network persona (Windows, macOS, or iOS) at the wire level — without touching the system hostname or breaking internal configuration. Optional protocol encapsulation routes traffic through Tor, WireGuard, I2P, Shadowsocks, QUIC tunnels, or layered combinations.
+A cross-platform identity spoofing toolkit for penetration testing and security assessments. Written in Go, ID-Spoofer randomizes MAC addresses and projects a convincing OS network persona (Windows, macOS, or iOS) at the wire level — without touching the system hostname or breaking internal configuration. Optional protocol encapsulation routes traffic through Tor, WireGuard, I2P, Shadowsocks, QUIC tunnels, an embedded tun2socks pivot for raw-socket tools, or layered combinations.
 
 ## Demo
 
@@ -26,29 +26,24 @@ A cross-platform identity spoofing toolkit for penetration testing and security 
 
 <div align="center">
 
-**New Dashboard 2.0.5**
-<img src="assets/images/screenshot0_dashboard.png" alt="New dashboard showing active connections for ease of management" width="800"/>
+**Dashboard**
+<img src="assets/images/screenshot0_dashboard.png" alt="Dashboard: interfaces, active VPNs, default route with VPN detection, listening ports and warnings" width="800"/>
+
+*Live interfaces, active VPNs (Mullvad detected through policy routing), default route and listening ports with their owning processes.*
 
 ---
 
-**Applying Network Persona**
-<img src="assets/images/screenshot2_persona.png" alt="Applying network persona — DHCP hostname, TTL, MSS=1460, NFQUEUE active" width="800"/>
+**Tunnel profiles**
+<img src="assets/images/screenshot2_tunnel.png" alt="Tunnel tab: protocol list, profile panel, live tunnel status and log tail" width="800"/>
 
-*DHCP hostname injected, TTL set, MSS=1460, NFQUEUE rewriting IP ID + TCP options. System hostname unchanged.*
-
----
-
-**Status — Persona Active**
-<img src="assets/images/screenshot3_rewrite.png" alt="Status view showing IDSPOOF_NETEMU iptables chain and active NFQUEUE rewriter" width="800"/>
-
-*`idspoof status` after apply: IDSPOOF_NETEMU chain dumped, NFQUEUE rewriter confirmed active on queue 42.*
+*Pick a protocol, create or paste a profile from the preset catalog, test it, and watch the live tunnel state and log, all inside the TUI.*
 
 ---
 
-**Status — Clean State**
-<img src="assets/images/screenshot1_status.png" alt="Status view before apply — no iptables rules, NFQUEUE not active" width="800"/>
+**Status**
+<img src="assets/images/screenshot1_status.png" alt="Status tab: spoofed MAC, active macOS persona, modified TCP/IP fingerprint, active tun2socks tunnel" width="800"/>
 
-*Before apply: sysctl already at Windows values (TTL=128, timestamps=0) but no iptables rules and NFQUEUE not running.*
+*After apply: spoofed MAC, active persona, the modified TCP/IP fingerprint and the running tunnel.*
 
 </div>
 
@@ -127,30 +122,59 @@ Tunnels run in two modes:
 
 ## Installation
 
-### From binary (recommended)
+### Debian, Ubuntu, Kali (recommended)
+
+Download `idspoof_<version>_linux_amd64.deb` (or `_arm64`) from the
+[Releases](https://github.com/NubleX/ID-Spoofer/releases) page, then:
 
 ```bash
-# Download the latest release for your platform
-curl -sL https://github.com/NubleX/ID-Spoofer/releases/latest/download/idspoof_linux_amd64 -o idspoof
-chmod +x idspoof
-sudo mv idspoof /usr/local/bin/
+sudo apt install ./idspoof_*_linux_amd64.deb
 ```
+
+This installs the binary, the **boot daemon** (a systemd service that starts
+before the network, like the Mullvad daemon), an **ID-Spoofer entry in the
+application menu** with its icon, and an example config directory. Open it from
+the menu, or run `sudo idspoof menu`. Press **B** in the TUI to choose what
+starts at boot. An `.rpm` is published as well.
+
+### Other Linux, from the tarball
+
+```bash
+tar xzf idspoof_<version>_linux_amd64.tar.gz
+cd idspoof_<version>_linux_amd64
+sudo ./install.sh              # remove again with: sudo ./install.sh uninstall
+```
+
+Installs to `/usr/local` (set `PREFIX=/usr` to change), enables the daemon and
+adds the menu entry and icon. Check downloads against `checksums.txt`.
+
+### macOS and Windows
+
+Download the archive for your platform from Releases and run the binary
+(`sudo ./idspoof menu` / an elevated terminal). The boot daemon and menu entry
+are Linux only for now.
 
 ### Build from source
 
 ```bash
 git clone https://github.com/NubleX/ID-Spoofer.git
-cd id-spoofer/idspoof
-make build
-sudo cp bin/idspoof /usr/local/bin/
+cd ID-Spoofer/idspoof
+make build        # binary in bin/idspoof
+sudo make install # binary + boot daemon + menu entry + icon
 ```
 
-Go 1.22+ required. If Go is not installed:
+Go 1.26+ required (the exact version is in `idspoof/go.mod`). Install Go from
+<https://go.dev/dl/>.
 
-```bash
-curl -sL https://go.dev/dl/go1.22.4.linux-amd64.tar.gz | tar -xz -C ~/.go --strip-components=1
-export PATH="$HOME/.go/bin:$PATH"
-```
+### The boot daemon
+
+`idspoof daemon` runs as root from `idspoof.service`. With no boot profile it
+idles. Press **B** in the TUI to save the current selection (MAC, persona,
+tunnel profile) as the boot profile, or write `/etc/idspoof/boot.yaml`. At boot
+the daemon applies the identity before `network-pre.target` (so the first DHCP
+request already carries it), starts and supervises the tunnel, and restores
+everything when stopped. If a boot profile ever breaks your network, add
+`idspoof.disable=1` to the kernel command line in the boot loader.
 
 ## Usage
 
@@ -195,19 +219,34 @@ sudo idspoof restore --mac
 # Roll back only network persona
 sudo idspoof restore --netident
 
-# Interactive TUI menu
+# Interactive TUI (everything below is also available here)
 sudo idspoof menu
+
+# Boot daemon (installed by the .deb / install.sh; the TUI's B key configures it)
+systemctl status idspoof
 
 # Version info
 idspoof version
 ```
+
+### TUI keys
+
+| Key | Action |
+|---|---|
+| `1`-`5`, `Tab` | Dashboard, Identity, Tunnel, Traffic, Status |
+| `A` | Apply the selection (shows a preview first; a 30 s auto-revert guard follows) |
+| `R` | Restore: everything, MAC only, persona only, or the tunnel only |
+| `B` | Boot profile: save the selection as what starts at boot, restart the service |
+| `L` | Reopen the last result |
+| Tunnel tab: `n` `p` `g` `t` `m` `d` `u` `x` | New profile from a preset, paste a config, generate keys, test, toggle mode, delete, start, stop |
+| Forms: `Ctrl+G` `Ctrl+R` `Ctrl+T` `Ctrl+S` | Generate field, generate all, show secrets, save |
 
 ### Apply flags
 
 ```
 --persona windows|macos|linux|ios|android   Network persona to project (default: windows)
 --tunnel PROTOCOL             Tunnel protocol: tor, wireguard, i2p, shadowsocks, quic, lwo,
-                              tor-over-vpn, vpn-over-tor
+                              tor-over-vpn, vpn-over-tor, tun2socks
 --tunnel-mode MODE            transparent (default) or socks
 --tunnel-config PATH          Config file for the tunnel (WireGuard .conf, Shadowsocks .json, etc.)
 ```
@@ -242,11 +281,14 @@ State is stored in `/var/log/idspoof/state.env` — an atomic key=value file bac
 The Go rewrite (`idspoof/`) replaces the original Bash scripts with a structured, cross-platform binary:
 
 ```
-cmd/idspoof/          CLI commands (cobra): apply, restore, status, menu, version
+cmd/idspoof/          CLI commands (cobra): apply, restore, status, menu, daemon, version; the TUI
 internal/
+  daemon/             Boot-time supervisor behind `idspoof daemon` (systemd notify)
+  boot/               Boot profile (/etc/idspoof/boot.yaml)
+  profile/            Tunnel profiles, preset catalog, key and password generators
   mac/                MAC generation and Linux interface manipulation
   netident/           Multi-OS network persona: sysctl, iptables, NFQUEUE, DHCP, mDNS
-  tunnel/             Protocol encapsulation: Tor, WireGuard, I2P, Shadowsocks, QUIC, combos
+  tunnel/             Protocol encapsulation: Tor, WireGuard, I2P, Shadowsocks, QUIC, tun2socks, combos
   spoofer/            Orchestrator: runs selected operations, collects results
   state/              Atomic key=value state file (bash v1 compatible)
   platform/           Platform abstraction + privilege checks
@@ -265,6 +307,7 @@ The original Bash toolkit is preserved in `legacy/` and in the `master` branch h
 - [x] Phase 5: macOS native (ifconfig, scutil, sysctl net.inet.ip.ttl)
 - [x] Phase 6: Windows native (registry MAC, WMI hostname, Tcpip\Parameters)
 - [x] Phase 7: GitHub Actions CI + goreleaser multi-platform releases
+- [x] Phase 8: TUI-native control (profiles, presets, preview and revert guard), boot daemon, .deb/.rpm packages
 
 ## Acknowledgements
 
